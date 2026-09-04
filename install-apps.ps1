@@ -1,18 +1,20 @@
 #====================================================================
 # SCRIPT DE IMPLEMENTACIÓN MASIVA DE APLICACIONES (Windows x64)
 #====================================================================
-# Versión: 2.0 (Corregida - Agosto 2026)
+# Versión: 2.1 (Corregida - Septiembre 2026)
 # Autor: Arquitectura de Sistemas y Gobernanza Autónoma - Gemini Notebook
+# Alojado en: https://javizcape.github.io/.ps1/install-apps.ps1
+# Ejecución:  irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex
 #====================================================================
 
 $ErrorActionPreference = "Stop"
 
 # Este script está diseñado para ejecutarse ÚNICAMENTE vía:
-#   irm https://tu-dominio-o-raw-url | iex
+#   irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex
 # Nunca se ejecuta como archivo local, por lo que $PSCommandPath jamás
-# existe y no debe usarse. Actualiza esta URL con la ubicación pública
-# final del script antes de publicarlo.
-$ScriptRemoteUrl = "https://raw.githubusercontent.com/tuusuario/turepo/main/install-apps-v2.ps1"
+# existe y no debe usarse. Si cambias de repositorio o de ruta, actualiza
+# esta URL antes de publicar.
+$ScriptRemoteUrl = "https://javizcape.github.io/.ps1/install-apps.ps1"
 
 $DesktopPath = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
 $ReportePath = Join-Path $DesktopPath "Reporte_Despliegue.json"
@@ -95,7 +97,7 @@ function Install-AppViaWinget {
         }
     } catch {
         $AppSw.Stop()
-        Write-Host "[FALLO] Error al instalar $AppName: $_" -ForegroundColor Red
+        Write-Host "[FALLO] Error al instalar ${AppName}: $_" -ForegroundColor Red
         return [PSCustomObject]@{
             app_name = $AppName
             estado   = "FAILED"
@@ -178,7 +180,7 @@ function Install-AppViaDirectUrl {
         }
     } catch {
         $AppSw.Stop()
-        Write-Host "[FALLO] Error al instalar $AppName: $_" -ForegroundColor Red
+        Write-Host "[FALLO] Error al instalar ${AppName}: $_" -ForegroundColor Red
         return [PSCustomObject]@{
             app_name = $AppName
             estado   = "FAILED"
