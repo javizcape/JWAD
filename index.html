@@ -217,6 +217,14 @@
   }
   .copy-btn:hover{color:var(--amber); border-color:var(--amber);}
   .copy-btn.copied{color:var(--teal); border-color:var(--teal);}
+  .copy-btn.manual{color:var(--amber); border-color:var(--amber);}
+  .code-block pre.selected-hint{outline:1px dashed var(--amber); outline-offset:2px;}
+  .copy-hint{
+    display:none; align-items:center; gap:8px; margin:0; padding:10px 16px;
+    background:var(--surface-2); border-top:1px solid var(--border);
+    font-family:var(--mono); font-size:12px; color:var(--amber);
+  }
+  .copy-hint.show{display:flex;}
   .note{
     font-size:14px; color:var(--text-faint); border-left:2px solid var(--border-strong);
     padding-left:14px; margin-top:24px;
@@ -470,6 +478,7 @@
           <button class="copy-btn" id="btn-cmd-hero" onclick="copyCmd('cmd-hero')">Copiar</button>
         </div>
         <pre id="cmd-hero">irm https://javizcape.github.io/JWAD/install-apps.ps1 | iex</pre>
+        <p class="copy-hint" id="hint-cmd-hero">⚠ Tu navegador o una extensión bloqueó la copia automática. El texto ya está seleccionado arriba — pulsa <strong>Ctrl+C</strong> (o clic derecho → Copiar).</p>
       </div>
 
       <div class="code-block">
@@ -478,6 +487,7 @@
           <button class="copy-btn" id="btn-cmd-alt" onclick="copyCmd('cmd-alt')">Copiar</button>
         </div>
         <pre id="cmd-alt">iex (curl.exe -s https://javizcape.github.io/JWAD/install-apps.ps1 | Out-String)</pre>
+        <p class="copy-hint" id="hint-cmd-alt">⚠ Tu navegador o una extensión bloqueó la copia automática. El texto ya está seleccionado arriba — pulsa <strong>Ctrl+C</strong> (o clic derecho → Copiar).</p>
       </div>
 
       <div class="verify-box">
@@ -824,6 +834,27 @@
     return ok;
   }
 
+  // Última instancia: si la API de portapapeles está bloqueada (por ejemplo por una
+  // extensión de seguridad que detecta el patrón "irm | iex"), no forzamos nada —
+  // simplemente dejamos el texto del <pre> seleccionado para que el usuario pueda
+  // copiarlo él mismo con Ctrl+C, y se lo indicamos con un aviso visible.
+  function selectForManualCopy(id){
+    const pre = document.getElementById(id);
+    if(!pre) return;
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    pre.classList.add('selected-hint');
+    const hint = document.getElementById('hint-' + id);
+    if(hint) hint.classList.add('show');
+    setTimeout(() => {
+      pre.classList.remove('selected-hint');
+      if(hint) hint.classList.remove('show');
+    }, 6000);
+  }
+
   function flashCopied(id){
     const btn = document.getElementById('btn-' + id);
     if(btn){
@@ -840,16 +871,32 @@
     }
   }
 
-  // Some privacy/security extensions (e.g. uBlock's ClickFix guard) block navigator.clipboard
-  // on pages matching this content pattern, so we fall back to execCommand when needed.
+  function flagManual(id){
+    const btn = document.getElementById('btn-' + id);
+    if(btn){
+      const original = btn.textContent;
+      btn.textContent = 'Selecciona y copia';
+      btn.classList.add('manual');
+      setTimeout(() => { btn.textContent = original; btn.classList.remove('manual'); }, 6000);
+    }
+  }
+
+  // Algunas extensiones de privacidad/seguridad (p. ej. la protección "Clickfix" de uBlock
+  // Origin) bloquean deliberadamente navigator.clipboard y, a veces, también
+  // document.execCommand('copy') en páginas que muestran el patrón "irm ... | iex" — es una
+  // protección intencional contra ataques ClickFix, no un fallo de esta página. Cuando eso
+  // ocurre, no intentamos evadirla: degradamos a selección manual del texto para que el
+  // propio usuario decida copiarlo con Ctrl+C.
   function copyCmd(id){
     const text = commands[id];
     if(navigator.clipboard && window.isSecureContext){
       navigator.clipboard.writeText(text).then(() => flashCopied(id)).catch(() => {
-        if(fallbackCopy(text)) flashCopied(id);
+        if(fallbackCopy(text)){ flashCopied(id); }
+        else { selectForManualCopy(id); flagManual(id); }
       });
     } else {
-      if(fallbackCopy(text)) flashCopied(id);
+      if(fallbackCopy(text)){ flashCopied(id); }
+      else { selectForManualCopy(id); flagManual(id); }
     }
   }
 
