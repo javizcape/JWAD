@@ -1,75 +1,116 @@
-<svg width="1280" height="320" viewBox="0 0 1280 320" xmlns="http://www.w3.org/2000/svg" xmlns:c2pa="http://c2pa.org/manifest"><metadata><c2pa:manifest>AAAWgmp1bWIAAAAeanVtZGMycGEAEQAQgAAAqgA4m3EDYzJwYQAAABZcanVtYgAAAEdqdW1kYzJtYQARABCAAACqADibcQN1cm46YzJwYTozOTg5YTg2Zi1jM2NjLTQxODQtOGI0NS1mNzk0MGE1YzQ4NjUAAAADl2p1bWIAAAApanVtZGMyYXMAEQAQgAAAqgA4m3EDYzJwYS5hc3NlcnRpb25zAAAAALxqdW1iAAAARGp1bWRjYm9yABEAEIAAAKoAOJtxE2MycGEuaW5ncmVkaWVudC52MwAAAAAYYzJzaMlE60vKhUJbxqyG3TDH4toAAABwY2JvcqNpZGM6Zm9ybWF0bWltYWdlL3N2Zyt4bWxqaW5zdGFuY2VJRHgseG1wOmlpZDoyMDA3YmJhOS0yNzkxLTQzZWMtYjkyNy0yNzdmMTBhM2NlNDRscmVsYXRpb25zaGlwaHBhcmVudE9mAAAB4mp1bWIAAABBanVtZGNib3IAEQAQgAAAqgA4m3ETYzJwYS5hY3Rpb25zLnYyAAAAABhjMnNox1CKKuZgdBfftoKIIx2N5QAAAZljYm9yomdhY3Rpb25zgqJmYWN0aW9ua2MycGEub3BlbmVkanBhcmFtZXRlcnOha2luZ3JlZGllbnRzgaJjdXJseC1zZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmluZ3JlZGllbnQudjNkaGFzaFggWK6nIw5PrsjMqkY3Os8yQLyDD3WoM33sHaXzpu7fMzukZmFjdGlvbngdY29tLmFudGhyb3BpYy5jbGF1ZGUucHJvdmlkZWRqcGFyYW1ldGVyc6F4H2NvbS5hbnRocm9waWMub3JpZ2luLWNvbmZpZGVuY2VndW5rbm93bmtkZXNjcmlwdGlvbnhmQ2xhdWRlIHByb3ZpZGVkIHRoaXMgZmlsZSBhdCB0aGUgcmVxdWVzdCBvZiBhIHVzZXIgYW5kIG1heSBoYXZlIGNyZWF0ZWQgb3IgbW9kaWZpZWQgdGhlIGZpbGUgY29udGVudHMubXNvZnR3YXJlQWdlbnShZG5hbWVmQ2xhdWRlcmFsbEFjdGlvbnNJbmNsdWRlZPUAAADIanVtYgAAAEBqdW1kY2JvcgARABCAAACqADibcRNjMnBhLmhhc2guZGF0YQAAAAAYYzJzaMCKw14PGh5sYy2qwVdbEp8AAACAY2JvcqVjYWxnZnNoYTI1NmNwYWRNAAAAAAAAAAAAAAAAAGRoYXNoWCAqoqdHY41syJ7hLBDekuie9u6cdpLcWdoByOySNiFwYWRuYW1lbmp1bWJmIG1hbmlmZXN0amV4Y2x1c2lvbnOBomVzdGFydBiYZmxlbmd0aBkeBAAAAj5qdW1iAAAAJ2p1bWRjMmNsABEAEIAAAKoAOJtxA2MycGEuY2xhaW0udjIAAAACD2Nib3KlY2FsZ2ZzaGEyNTZpc2lnbmF0dXJleE1zZWxmI2p1bWJmPS9jMnBhL3VybjpjMnBhOjM5ODlhODZmLWMzY2MtNDE4NC04YjQ1LWY3OTQwYTVjNDg2NS9jMnBhLnNpZ25hdHVyZWppbnN0YW5jZUlEeCx4bXA6aWlkOjhjOTdhODI4LWRmNGYtNDJhMy04Njc3LWFmNzU5NGU1ZTI3NnJjcmVhdGVkX2Fzc2VydGlvbnODomN1cmx4LXNlbGYjanVtYmY9YzJwYS5hc3NlcnRpb25zL2MycGEuaW5ncmVkaWVudC52M2RoYXNoWCBYrqcjDk+uyMyqRjc6zzJAvIMPdagzfewdpfOm7t8zO6JjdXJseCpzZWxmI2p1bWJmPWMycGEuYXNzZXJ0aW9ucy9jMnBhLmFjdGlvbnMudjJkaGFzaFggdE/dE2t3YzQYjrONOlcnFMEZ438Hjyni1Wd7p8Bt0uuiY3VybHgpc2VsZiNqdW1iZj1jMnBhLmFzc2VydGlvbnMvYzJwYS5oYXNoLmRhdGFkaGFzaFggNb9cperJ04agPSAPENfytaiOJfLUbuNau+8IhpZkws90Y2xhaW1fZ2VuZXJhdG9yX2luZm+jZG5hbWVvQW50aHJvcGljIEZpbGVzZ3ZlcnNpb25lMS4wLjBrc3BlY1ZlcnNpb25lMi40LjAAABA4anVtYgAAAChqdW1kYzJjcwARABCAAACqADibcQNjMnBhLnNpZ25hdHVyZQAAABAIY2JvctKEWQISogEmGCFZAgowggIGMIIBjaADAgECAhRA5aAK7sI50L64g/oGQgU9Z1UTADAKBggqhkjOPQQDAzBJMRcwFQYDVQQKEw5BbnRocm9waWMsIFBCQzEuMCwGA1UEAxMlQW50aHJvcGljIENvbnRlbnQgQ3JlZGVudGlhbHMgUm9vdCBDQTAeFw0yNjA4MDcxODQzNTZaFw0yODA4MDYxOTQzNTZaMEQxFzAVBgNVBAoTDkFudGhyb3BpYywgUEJDMSkwJwYDVQQDEyBBbnRocm9waWMgQ2xhdWRlIENvbnRlbnQgU2lnbmluZzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJh6CmvLUBgFFNU0vUKlOVtE6djd17L5SuwX0LemFisBM3dkd/3cyjxFA3Qo5S46fX0/ihY0VZ7mfb9KF703t5OjWDBWMA4GA1UdDwEB/wQEAwIHgDAVBgNVHSUEDjAMBgorBgEEAYPoXgIBMAwGA1UdEwEB/wQCMAAwHwYDVR0jBBgwFoAUzlHiBIFOZFsj+OPEz5o+nMHXXMIwCgYIKoZIzj0EAwMDZwAwZAIwMXMdFJ4BetLLVY7ORuE9noqbbAZOZn/aArXyTwFAZfKrPzxF2vPoJNf1+UCdg1XGAjBwX1zd9WGqYkqmL5SFqw1QySjr1zJfpJM9+1rdDwSPLMOPOjKuiXjoU/pUUeG9RwmhY3BhZFkNngAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPZYQDEgUz68zIs3ME08u7PG5fgRRWy8A5levK9HzZZQG0Mas6QGfAkPpf459PirLTbxrcykbgey7c2/vG4I1PjFZXM=</c2pa:manifest></metadata>
-  <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0b1220"/>
-      <stop offset="55%" stop-color="#0f1b2d"/>
-      <stop offset="100%" stop-color="#101c33"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="100%" stop-color="#0078D6"/>
-    </linearGradient>
-    <linearGradient id="winbtn" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="100%" stop-color="#1e6fd9"/>
-    </linearGradient>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1c2a42" stroke-width="1"/>
-    </pattern>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#020817"/><stop offset=".55" stop-color="#071426"/><stop offset="1" stop-color="#030b18"/>
+  </linearGradient>
+  <linearGradient id="blue" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#1d9bf0"/><stop offset="1" stop-color="#38d9ff"/>
+  </linearGradient>
+  <linearGradient id="blue2" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#39c5ff"/><stop offset="1" stop-color="#0757d8"/>
+  </linearGradient>
+  <filter id="glow"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+    <path d="M32 0H0V32" fill="none" stroke="#17304e" stroke-width="1"/>
+  </pattern>
+  <pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse">
+    <circle cx="2" cy="2" r="1.2" fill="#1c6db5"/>
+  </pattern>
+</defs>
 
-  <!-- Fondo -->
-  <rect width="1280" height="320" fill="url(#bg)"/>
-  <rect width="1280" height="320" fill="url(#grid)" opacity="0.35"/>
+<!-- Background -->
+<rect width="1280" height="320" fill="url(#bg)"/>
+<rect width="1280" height="320" fill="url(#grid)" opacity=".18"/>
+<rect x="0" y="0" width="220" height="105" fill="url(#dots)" opacity=".35"/>
+<rect x="1080" y="0" width="200" height="140" fill="url(#dots)" opacity=".32"/>
 
-  <!-- Franja de acento superior -->
-  <rect x="0" y="0" width="1280" height="6" fill="url(#accent)"/>
+<!-- Technical diagonal architecture -->
+<path d="M920 0H1050L790 320H660Z" fill="#06254a" opacity=".55"/>
+<path d="M1115 0H1170L910 320H855Z" fill="url(#blue2)" opacity=".9"/>
+<path d="M1190 0H1220L960 320H930Z" fill="#0b3c8b" opacity=".75"/>
+<path d="M0 302H610L590 320H0Z" fill="#0a4d91" opacity=".65"/>
+<path d="M0 0H8V320H0Z" fill="url(#blue)"/>
 
-  <!-- Icono de ventana estilo Windows -->
-  <g transform="translate(64,96)">
-    <rect x="0" y="0" width="120" height="120" rx="14" fill="#132038" stroke="#25406b" stroke-width="1.5"/>
-    <rect x="10" y="10" width="47" height="47" rx="4" fill="url(#winbtn)"/>
-    <rect x="63" y="10" width="47" height="47" rx="4" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
-    <rect x="10" y="63" width="47" height="47" rx="4" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
-    <rect x="63" y="63" width="47" height="47" rx="4" fill="url(#winbtn)"/>
+<!-- Left brand mark -->
+<g transform="translate(48 38)">
+  <path d="M0 43L38 0H58L27 35H52L18 72H0L24 43Z" fill="url(#blue2)"/>
+  <path d="M30 43L67 0H83L51 35H73L43 72H26L48 43Z" fill="#38d9ff"/>
+</g>
+<text x="145" y="83" font-family="Segoe UI, Arial, sans-serif" font-size="39" font-weight="800" letter-spacing="2" fill="#f5f9ff">JAVIZCAPE</text>
+
+<!-- Main title -->
+<text x="48" y="132" font-family="Segoe UI, Arial, sans-serif" font-size="33" font-weight="800" letter-spacing="1.2" fill="#ffffff">WINDOWS APP DEPLOYER</text>
+<rect x="48" y="146" width="545" height="3" rx="2" fill="url(#blue)"/>
+<path d="M575 146h28l-10 10h-28Z" fill="#1d9bf0"/>
+<path d="M612 146h18l-10 10h-18Z" fill="#38d9ff"/>
+
+<!-- Description -->
+<text x="48" y="181" font-family="Segoe UI, Arial, sans-serif" font-size="17" font-weight="700" fill="#39cfff" letter-spacing=".8">AUTOMATIZA · DESPLIEGA · OPTIMIZA</text>
+<text x="48" y="205" font-family="Segoe UI, Arial, sans-serif" font-size="14.5" fill="#c5d5e5">Instalación y administración silenciosa de aplicaciones</text>
+<text x="48" y="225" font-family="Segoe UI, Arial, sans-serif" font-size="14.5" fill="#c5d5e5">Windows mediante PowerShell y fuentes oficiales.</text>
+
+<!-- Feature cards -->
+<g font-family="Segoe UI, Arial, sans-serif">
+  <g transform="translate(48 246)">
+    <rect width="126" height="49" rx="7" fill="#07182b" stroke="#164e7a"/>
+    <circle cx="20" cy="24" r="11" fill="none" stroke="#28bfff" stroke-width="2"/>
+    <path d="M15 24l4 4 8-9" fill="none" stroke="#28bfff" stroke-width="2"/>
+    <text x="39" y="21" font-size="10.5" font-weight="800" fill="#fff">AUTOMATIZADO</text><text x="39" y="36" font-size="9" fill="#8eb4d2">SIN INTERVENCIÓN</text>
   </g>
-
-  <!-- Titulo -->
-  <text x="230" y="140" font-family="Segoe UI, Consolas, monospace" font-size="54" font-weight="700" fill="#f1f5f9">
-    Windows App Deployer
-  </text>
-  <text x="230" y="140" font-family="Segoe UI, Consolas, monospace" font-size="54" font-weight="700" fill="none" stroke="#38bdf8" stroke-width="0.6" opacity="0.5">
-    Windows App Deployer
-  </text>
-
-  <!-- Subtitulo -->
-  <text x="232" y="180" font-family="Consolas, monospace" font-size="21" fill="#9fb3c8">
-    Despliegue masivo, silencioso y automatizado de software esencial &#8226; Windows x64
-  </text>
-
-  <!-- Badges tipo "pill" decorativas -->
-  <g font-family="Consolas, monospace" font-size="16" font-weight="600">
-    <rect x="232" y="206" width="150" height="34" rx="17" fill="#0f2a1c" stroke="#22c55e" stroke-width="1.2"/>
-    <text x="307" y="228" fill="#4ade80" text-anchor="middle">MIT LICENSE</text>
-
-    <rect x="394" y="206" width="150" height="34" rx="17" fill="#10233f" stroke="#38bdf8" stroke-width="1.2"/>
-    <text x="469" y="228" fill="#7dd3fc" text-anchor="middle">POWERSHELL</text>
-
-    <rect x="556" y="206" width="150" height="34" rx="17" fill="#2a1a3d" stroke="#c084fc" stroke-width="1.2"/>
-    <text x="631" y="228" fill="#d8b4fe" text-anchor="middle">WINGET READY</text>
+  <g transform="translate(184 246)">
+    <rect width="126" height="49" rx="7" fill="#07182b" stroke="#164e7a"/>
+    <path d="M20 12v22M12 26l8 8 8-8" fill="none" stroke="#28bfff" stroke-width="2.5"/>
+    <text x="39" y="21" font-size="10.5" font-weight="800" fill="#fff">DESPLIEGUE</text><text x="39" y="36" font-size="9" fill="#8eb4d2">SILENCIOSO</text>
   </g>
-
-  <!-- Prompt de terminal decorativo -->
-  <g transform="translate(830,60)">
-    <rect x="0" y="0" width="386" height="200" rx="10" fill="#0a1220" stroke="#243350" stroke-width="1.5"/>
-    <circle cx="20" cy="22" r="6" fill="#ef4444"/>
-    <circle cx="42" cy="22" r="6" fill="#eab308"/>
-    <circle cx="64" cy="22" r="6" fill="#22c55e"/>
-    <line x1="0" y1="38" x2="386" y2="38" stroke="#243350" stroke-width="1"/>
-    <text x="18" y="70" font-family="Consolas, monospace" font-size="15" fill="#7dd3fc">PS C:\&gt; irm .../install-apps.ps1 &#124; iex</text>
-    <text x="18" y="98" font-family="Consolas, monospace" font-size="14" fill="#4ade80">[OK] Validando arquitectura AMD64</text>
-    <text x="18" y="122" font-family="Consolas, monospace" font-size="14" fill="#4ade80">[OK] Elevando privilegios (UAC)</text>
-    <text x="18" y="146" font-family="Consolas, monospace" font-size="14" fill="#4ade80">[OK] Instalando vía Winget...</text>
-    <text x="18" y="170" font-family="Consolas, monospace" font-size="14" fill="#facc15">[..] Generando Reporte_Despliegue.json</text>
+  <g transform="translate(320 246)">
+    <rect width="126" height="49" rx="7" fill="#07182b" stroke="#164e7a"/>
+    <path d="M20 11l10 4v8c0 7-5 12-10 14-5-2-10-7-10-14v-8z" fill="none" stroke="#28bfff" stroke-width="2"/>
+    <path d="M15 23l4 4 7-8" fill="none" stroke="#42e87a" stroke-width="2"/>
+    <text x="39" y="21" font-size="10.5" font-weight="800" fill="#fff">CONFIABLE</text><text x="39" y="36" font-size="9" fill="#8eb4d2">Y SEGURO</text>
   </g>
+  <g transform="translate(456 246)">
+    <rect width="126" height="49" rx="7" fill="#07182b" stroke="#164e7a"/>
+    <path d="M20 12v24M12 24h16" stroke="#28bfff" stroke-width="2"/>
+    <path d="M20 12a12 12 0 0 1 12 12" fill="none" stroke="#28bfff" stroke-width="2"/>
+    <text x="39" y="21" font-size="10.5" font-weight="800" fill="#fff">EFICIENTE</text><text x="39" y="36" font-size="9" fill="#8eb4d2">Y RÁPIDO</text>
+  </g>
+</g>
+
+<!-- Terminal panel -->
+<g transform="translate(690 43)">
+  <rect x="10" y="10" width="515" height="226" rx="15" fill="#07111e" stroke="#0a5aa2" stroke-width="2" opacity=".7" filter="url(#glow)"/>
+  <rect width="515" height="226" rx="15" fill="#060d18" stroke="#285176" stroke-width="1.5"/>
+  <rect width="515" height="37" rx="15" fill="#0b1727"/>
+  <rect y="22" width="515" height="15" fill="#0b1727"/>
+  <circle cx="22" cy="19" r="5" fill="#ef4444"/><circle cx="39" cy="19" r="5" fill="#eab308"/><circle cx="56" cy="19" r="5" fill="#22c55e"/>
+  <text x="78" y="24" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#d6e4f2">Windows App Deployer</text>
+  <text x="20" y="65" font-family="Consolas, monospace" font-size="12.5" fill="#38d9ff">PS C:\&gt; .\install-apps.ps1</text>
+  <text x="20" y="89" font-family="Consolas, monospace" font-size="12" fill="#4ade80">[OK] Validando arquitectura AMD64</text>
+  <text x="20" y="112" font-family="Consolas, monospace" font-size="12" fill="#4ade80">[OK] Elevando privilegios (UAC)</text>
+  <text x="20" y="135" font-family="Consolas, monospace" font-size="12" fill="#4ade80">[OK] Instalando vía Winget...</text>
+  <text x="20" y="158" font-family="Consolas, monospace" font-size="12" fill="#facc15">[..] Generando reporte de despliegue</text>
+  <text x="20" y="181" font-family="Consolas, monospace" font-size="12" fill="#a5b4fc">[INFO] 11 aplicaciones procesadas</text>
+  <text x="20" y="204" font-family="Consolas, monospace" font-size="12" fill="#4ade80">[DONE] Despliegue completado ✓</text>
+</g>
+
+<!-- PowerShell cube / terminal emblem -->
+<g transform="translate(1210 63)">
+  <polygon points="0,22 38,0 76,22 76,66 38,88 0,66" fill="#07182b" stroke="#28cfff" stroke-width="2"/>
+  <path d="M19 31l14 12-14 12M39 57h18" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+
+<!-- Footer -->
+<g transform="translate(690 282)" font-family="Segoe UI, Arial, sans-serif">
+  <rect x="0" y="0" width="120" height="25" rx="12" fill="#0d251c" stroke="#22c55e"/>
+  <text x="60" y="17" text-anchor="middle" font-size="10" font-weight="800" fill="#4ade80">MIT LICENSE</text>
+  <rect x="132" y="0" width="132" height="25" rx="12" fill="#0b2138" stroke="#38bdf8"/>
+  <text x="198" y="17" text-anchor="middle" font-size="10" font-weight="800" fill="#7dd3fc">POWERSHELL</text>
+  <rect x="276" y="0" width="132" height="25" rx="12" fill="#18133a" stroke="#a78bfa"/>
+  <text x="342" y="17" text-anchor="middle" font-size="10" font-weight="800" fill="#c4b5fd">WINGET READY</text>
+  <rect x="420" y="0" width="150" height="25" rx="12" fill="#0b2138" stroke="#38bdf8"/>
+  <text x="495" y="17" text-anchor="middle" font-size="10" font-weight="800" fill="#7dd3fc">PRODUCTION READY</text>
+</g>
+
+<!-- Bottom luminous line -->
+<rect x="0" y="316" width="1280" height="4" fill="url(#blue)"/>
 </svg>
