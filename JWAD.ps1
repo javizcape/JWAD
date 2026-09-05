@@ -3,22 +3,51 @@
 #====================================================================
 # Version: 2.2 (Corregida - Septiembre 2026)
 # Autor: Arquitectura de Sistemas y Gobernanza Autonoma - Gemini Notebook
-# Alojado en: https://javizcape.github.io/.ps1/install-apps.ps1
-# Ejecucion:  irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex
+# Alojado en: https://javizcape.github.io/JWAD/JWAD.ps1
+# Ejecucion:  irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
 #====================================================================
 
 $ErrorActionPreference = "Stop"
 
 # Este script esta disenado para ejecutarse UNICAMENTE via:
-#   irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex
+#   irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
 # Nunca se ejecuta como archivo local, por lo que $PSCommandPath jamas
 # existe y no debe usarse. Si cambias de repositorio o de ruta, actualiza
 # esta URL antes de publicar.
-$ScriptRemoteUrl = "https://javizcape.github.io/.ps1/install-apps.ps1"
+$ScriptRemoteUrl = "https://javizcape.github.io/JWAD/JWAD.ps1"
 
 $DesktopPath = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
 $ReportePath = Join-Path $DesktopPath "Reporte_Despliegue.json"
 $TiempoTotalSw = [System.Diagnostics.Stopwatch]::StartNew()
+
+#====================================================================
+# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
+# Banner ASCII de apertura + tipografia moderna tipo bloque + soporte
+# UTF-8 para que los caracteres de bloque se rendericen correctamente
+# sin importar la consola/fuente en la que se ejecute el script.
+#====================================================================
+try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {}
+
+$JWADBannerGrande = @(
+    '     ██╗██╗    ██╗ █████╗ ██████╗ ',
+    '     ██║██║    ██║██╔══██╗██╔══██╗',
+    '     ██║██║ █╗ ██║███████║██║  ██║',
+    '██   ██║██║███╗██║██╔══██║██║  ██║',
+    '╚█████╔╝╚███╔███╔╝██║  ██║██████╔╝',
+    ' ╚════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═════╝ '
+)
+$JWADGradiente = @('Cyan', 'Blue', 'Magenta', 'Magenta', 'Blue', 'Cyan')
+
+Write-Host ""
+Write-Host "  ╭──────────────────────────────────────────╮" -ForegroundColor DarkGray
+for ($i = 0; $i -lt $JWADBannerGrande.Count; $i++) {
+    Write-Host "  $($JWADBannerGrande[$i])" -ForegroundColor $JWADGradiente[$i]
+}
+Write-Host "  ╰──────── WINDOWS APP DEPLOYER · v2.2 ──────╯" -ForegroundColor DarkGray
+Write-Host ""
 
 # 1. VALIDACION PREVIA Y PRIVILEGIOS DE ADMINISTRADOR
 Write-Host "=========================================================" -ForegroundColor Cyan
@@ -258,12 +287,40 @@ function Install-AppViaDirectUrl {
     }
 }
 
+#====================================================================
+# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
+# Barra de progreso ASCII simple y visual para seguir el avance global
+# del despliegue (complementos + 11 aplicaciones = 14 pasos).
+#====================================================================
+function Show-JWADProgressBar {
+    param (
+        [int]$Current,
+        [int]$Total,
+        [string]$Label
+    )
+    $Ancho = 28
+    $Fraccion = if ($Total -gt 0) { $Current / $Total } else { 0 }
+    $Relleno = [Math]::Round($Ancho * $Fraccion)
+    if ($Relleno -gt $Ancho) { $Relleno = $Ancho }
+    $Vacio = $Ancho - $Relleno
+    $Barra = ('█' * $Relleno) + ('░' * $Vacio)
+    $Porcentaje = [Math]::Round($Fraccion * 100)
+    Write-Host ""
+    Write-Host ("  [{0,2}/{1,2}] {2}" -f $Current, $Total, $Label) -ForegroundColor Magenta
+    Write-Host ("  ▐$Barra▌ {0,3}%" -f $Porcentaje) -ForegroundColor DarkCyan
+}
+
+$JWADPasoActual = 0
+$JWADPasosTotal = 14
+
 # 3. VERIFICACION E INSTALACION DE COMPLEMENTOS PREVIOS (REQUISITOS)
 Write-Host "`n=========================================================" -ForegroundColor Cyan
 Write-Host " INSTALANDO COMPLEMENTOS DE SISTEMA REQUERIDOS" -ForegroundColor Cyan
 Write-Host "=========================================================" -ForegroundColor Cyan
 
 # Visual C++ Redistributable x64
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Visual C++ Redistributable x64"
 $VCRedistResult = Install-AppViaWinget -AppName "Visual C++ Redistributable x64" -WingetId "Microsoft.VCRedist.2015+.x64"
 
 # .NET Framework (validacion, no reinstalacion forzada)
@@ -272,6 +329,8 @@ $VCRedistResult = Install-AppViaWinget -AppName "Visual C++ Redistributable x64"
 # caracteristica "NetFX4" usado en la version anterior de este script NO
 # existe como feature de DISM, lo cual provocaba el error 0x800f0813. Aqui
 # se valida su presencia y version consultando el registro oficial de .NET.
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label ".NET Framework (validacion)"
 $NetSw = [System.Diagnostics.Stopwatch]::StartNew()
 Write-Host "[*] Verificando presencia de .NET Framework 4.x..." -ForegroundColor Blue
 try {
@@ -312,6 +371,8 @@ try {
 # NOTA: Oracle discontinuo la distribucion publica de "Oracle.JRE" en el
 # repositorio de winget (por eso fallaba con "paquete no encontrado"). El
 # reemplazo libre y con soporte activo es Eclipse Temurin JRE (OpenJDK).
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Java Runtime Environment (JRE) x64"
 $JavaResult = Install-AppViaWinget -AppName "Java Runtime Environment" -WingetId "EclipseAdoptium.Temurin.21.JRE"
 
 # 4. INSTALACION DE LAS 11 APLICACIONES PRINCIPALES
@@ -327,6 +388,8 @@ $ResultadosList.Add($NetResult)
 $ResultadosList.Add($JavaResult)
 
 # App 1: 7-Zip (Winget)
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "7-Zip"
 $ResultadosList.Add((Install-AppViaWinget -AppName "7-Zip" -WingetId "7zip.7zip"))
 
 # App 2: Bulk Crap Uninstaller (Winget)
@@ -334,41 +397,61 @@ $ResultadosList.Add((Install-AppViaWinget -AppName "7-Zip" -WingetId "7zip.7zip"
 # (el usado antes, "BCUninstaller.BulkCrapUninstaller", no existe y causaba el
 # error "paquete no encontrado"). El instalador es Inno Setup: los switches
 # silenciosos correctos son /VERYSILENT /SUPPRESSMSGBOXES /NORESTART.
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Bulk Crap Uninstaller"
 $ResultadosList.Add((Install-AppViaWinget -AppName "Bulk Crap Uninstaller" -WingetId "Klocman.BulkCrapUninstaller" -Arguments "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"))
 
 # App 3: SumatraPDF (Winget)
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "SumatraPDF"
 $ResultadosList.Add((Install-AppViaWinget -AppName "SumatraPDF" -WingetId "SumatraPDF.SumatraPDF"))
 
 # App 4: AB Download Manager (GitHub - Descarga Directa)
 # NOTA: el instalador es NSIS; el switch silencioso correcto es /S (no /SILENT,
 # que no es reconocido por NSIS y provocaba el Exit Code 1).
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "AB Download Manager"
 $ResultadosList.Add((Install-AppViaDirectUrl -AppName "AB Download Manager" -Repo "amir1376/ab-download-manager" -AssetFilter "Setup" -Arguments "/S"))
 
 # App 5: WinRAR x64 (ES) (Winget)
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "WinRAR x64"
 $ResultadosList.Add((Install-AppViaWinget -AppName "WinRAR x64" -WingetId "RARLab.WinRAR" -Arguments "/S"))
 
 # App 6: VLC Media Player (Winget)
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "VLC Media Player"
 $ResultadosList.Add((Install-AppViaWinget -AppName "VLC Media Player" -WingetId "VideoLAN.VLC" -Arguments "/S"))
 
 # App 7: Google Chrome (Winget)
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Google Chrome"
 $ResultadosList.Add((Install-AppViaWinget -AppName "Google Chrome" -WingetId "Google.Chrome" -Arguments "/silent /install"))
 
 # App 8: Mozilla Firefox (Winget)
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mozilla Firefox"
 $ResultadosList.Add((Install-AppViaWinget -AppName "Mozilla Firefox" -WingetId "Mozilla.Firefox" -Arguments "-ms"))
 
 # App 9: Mullvad Browser (Winget)
 # NOTA: el ID correcto en el repositorio de winget es "MullvadVPN.MullvadBrowser"
 # (el usado antes, "Mullvad.MullvadBrowser", no existe y causaba el error
 # "paquete no encontrado"). El instalador es NSIS, switch silencioso /S.
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mullvad Browser"
 $ResultadosList.Add((Install-AppViaWinget -AppName "Mullvad Browser" -WingetId "MullvadVPN.MullvadBrowser" -Arguments "/S"))
 
 # App 10: Microsoft Edge para Empresas (Winget)
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Microsoft Edge"
 $ResultadosList.Add((Install-AppViaWinget -AppName "Microsoft Edge" -WingetId "Microsoft.Edge" -Arguments "/silent"))
 
 # App 11: FlyPhotos (GitHub - Descarga Directa)
 # NOTA: el instalador es MSI; no se envia -Arguments porque el switch previo
 # (/S) no es valido para msiexec y provocaba el Exit Code 1639. La funcion ya
 # aplica /qn /norestart de forma nativa para instaladores MSI.
+$JWADPasoActual++
+Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "FlyPhotos"
 $ResultadosList.Add((Install-AppViaDirectUrl -AppName "FlyPhotos" -Repo "riyasy/FlyPhotos" -AssetFilter "Setup"))
 
 # 5. RECOPILACION DE TELEMETRIA DEL HARDWARE Y DEL SISTEMA
@@ -509,3 +592,21 @@ foreach ($App in $ResultadosList) {
 Write-Host "`n=========================================================" -ForegroundColor Green
 Write-Host " Proceso de automatizacion finalizado con exito." -ForegroundColor Green
 Write-Host "=========================================================" -ForegroundColor Green
+
+#====================================================================
+# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
+# Firma ASCII de cierre, version reducida del banner de apertura.
+#====================================================================
+$JWADBannerPequeno = @(
+    '    ___      ___   ___  ',
+    ' _ | \ \    / /_\ |   \ ',
+    '| || |\ \/\/ / _ \| |) |',
+    ' \__/  \_/\_/_/ \_\___/ '
+)
+
+Write-Host ""
+foreach ($JWADLinea in $JWADBannerPequeno) {
+    Write-Host "  $JWADLinea" -ForegroundColor DarkGray
+}
+Write-Host "  javizcape.github.io/JWAD" -ForegroundColor DarkGray
+Write-Host ""
