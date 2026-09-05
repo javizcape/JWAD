@@ -22,31 +22,31 @@ $TiempoTotalSw = [System.Diagnostics.Stopwatch]::StartNew()
 
 #====================================================================
 # CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
-# Banner ASCII de apertura + tipografia moderna tipo bloque + soporte
-# UTF-8 para que los caracteres de bloque se rendericen correctamente
-# sin importar la consola/fuente en la que se ejecute el script.
+# Banner de apertura en ASCII PURO (sin caracteres Unicode de bloque/
+# caja): la version anterior usaba glifos de bloque Unicode que, al viajar
+# por el pipeline "irm | iex" (descarga remota + interpretacion del
+# codigo), pueden llegar a decodificarse con la pagina de codigos
+# incorrecta (ANSI/CP1252 en vez de UTF-8) y mostrarse como texto
+# corrupto (mojibake). Usando solo caracteres ASCII (\ _ | / =) se
+# garantiza que el logo se vea igual de bien en cualquier consola,
+# igual que ya ocurre con la firma pequena del cierre.
 #====================================================================
-try {
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    $OutputEncoding = [System.Text.Encoding]::UTF8
-} catch {}
-
 $JWADBannerGrande = @(
-    '     ██╗██╗    ██╗ █████╗ ██████╗ ',
-    '     ██║██║    ██║██╔══██╗██╔══██╗',
-    '     ██║██║ █╗ ██║███████║██║  ██║',
-    '██   ██║██║███╗██║██╔══██║██║  ██║',
-    '╚█████╔╝╚███╔███╔╝██║  ██║██████╔╝',
-    ' ╚════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═════╝ '
+    '     ___        ___    ____  ',
+    '    | \ \      / / \  |  _ \ ',
+    ' _  | |\ \ /\ / / _ \ | | | |',
+    '| |_| | \ V  V / ___ \| |_| |',
+    ' \___/   \_/\_/_/   \_\____/ '
 )
-$JWADGradiente = @('Cyan', 'Blue', 'Magenta', 'Magenta', 'Blue', 'Cyan')
+$JWADGradiente = @('Cyan', 'Blue', 'White', 'Blue', 'Cyan')
 
 Write-Host ""
-Write-Host "  ╭──────────────────────────────────────────╮" -ForegroundColor DarkGray
+Write-Host "  ============================================" -ForegroundColor Cyan
 for ($i = 0; $i -lt $JWADBannerGrande.Count; $i++) {
     Write-Host "  $($JWADBannerGrande[$i])" -ForegroundColor $JWADGradiente[$i]
 }
-Write-Host "  ╰──────── WINDOWS APP DEPLOYER · v2.2 ──────╯" -ForegroundColor DarkGray
+Write-Host "         WINDOWS APP DEPLOYER - v2.2" -ForegroundColor DarkCyan
+Write-Host "  ============================================" -ForegroundColor Cyan
 Write-Host ""
 
 # 1. VALIDACION PREVIA Y PRIVILEGIOS DE ADMINISTRADOR
@@ -291,6 +291,22 @@ function Install-AppViaDirectUrl {
 # CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
 # Barra de progreso ASCII simple y visual para seguir el avance global
 # del despliegue (complementos + 11 aplicaciones = 14 pasos).
+#
+# NOTAS DE AJUSTE:
+# - Se reemplazan los caracteres de bloque Unicode que se usaban antes
+#   por caracteres ASCII puros ('#', '.', '[', ']'), ya que al viajar
+#   por el pipeline remoto "irm | iex" podian decodificarse con la
+#   pagina de codigos incorrecta y mostrarse como texto corrupto.
+# - Se retira el porcentaje por aplicacion: como cada instalacion es
+#   una operacion atomica (via winget o msiexec en modo silencioso, sin
+#   progreso incremental real), mostrar un "%" por app era enganoso -
+#   por ejemplo, marcaba "100%" justo antes de iniciar la ultima
+#   instalacion, cuando en realidad esta ni siquiera habia comenzado.
+#   En su lugar se muestra el tiempo total transcurrido en segundos
+#   (dato real y siempre coherente, tomado del cronometro global).
+# - Paleta alineada con el resto del script (nada de magenta): azul
+#   claro/oscuro para la estructura, blanco para el dato, y verde para
+#   la porcion ya recorrida (mismo verde que usan los mensajes [OK]).
 #====================================================================
 function Show-JWADProgressBar {
     param (
@@ -303,11 +319,15 @@ function Show-JWADProgressBar {
     $Relleno = [Math]::Round($Ancho * $Fraccion)
     if ($Relleno -gt $Ancho) { $Relleno = $Ancho }
     $Vacio = $Ancho - $Relleno
-    $Barra = ('█' * $Relleno) + ('░' * $Vacio)
-    $Porcentaje = [Math]::Round($Fraccion * 100)
+    $SegundosTranscurridos = [Math]::Round($TiempoTotalSw.Elapsed.TotalSeconds, 1)
+
     Write-Host ""
-    Write-Host ("  [{0,2}/{1,2}] {2}" -f $Current, $Total, $Label) -ForegroundColor Magenta
-    Write-Host ("  ▐$Barra▌ {0,3}%" -f $Porcentaje) -ForegroundColor DarkCyan
+    Write-Host ("  [{0,2}/{1,2}] {2}" -f $Current, $Total, $Label) -ForegroundColor Cyan
+    Write-Host "  [" -ForegroundColor Blue -NoNewline
+    if ($Relleno -gt 0) { Write-Host ('#' * $Relleno) -ForegroundColor Green -NoNewline }
+    if ($Vacio -gt 0) { Write-Host ('.' * $Vacio) -ForegroundColor DarkBlue -NoNewline }
+    Write-Host "] " -ForegroundColor Blue -NoNewline
+    Write-Host ("{0}s transcurridos" -f $SegundosTranscurridos) -ForegroundColor White
 }
 
 $JWADPasoActual = 0
