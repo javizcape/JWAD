@@ -57,6 +57,7 @@ Pensado para técnicos, administradores de sistemas e integradores que necesitan
 | 🧩 **Híbrido Winget + GitHub API** | Usa el repositorio oficial de Microsoft y cae a releases de GitHub cuando no hay paquete |
 | 📊 **Telemetría real** | CPU, RAM, disco y temperatura vía WMI/CIM al finalizar |
 | ♻️ **Idempotente** | Valida códigos de salida (`0`, `3010`) antes de continuar al siguiente paso |
+| 🎨 **Consola con identidad propia** | Banner ASCII de bienvenida y barra de progreso visual por cada paso del despliegue |
 
 ---
 
@@ -69,17 +70,17 @@ Pensado para técnicos, administradores de sistemas e integradores que necesitan
 
 **Windows 10 / 11 (x64):**
 ```powershell
-irm https://javizcape.github.io/JWAD/install-apps.ps1 | iex
+irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
 ```
 
 **Alternativa** si tu red, ISP o DNS bloquean el comando anterior:
 ```powershell
-iex (curl.exe -s https://javizcape.github.io/JWAD/install-apps.ps1 | Out-String)
+iex (curl.exe -s https://javizcape.github.io/JWAD/JWAD.ps1 | Out-String)
 ```
 
 > 💡 **Tip:** ejecuta PowerShell **como Administrador** para evitar el paso extra de re-elevación.
 
-> ⚠️ **¿Tu antivirus, navegador o uBlock Origin marcó este comando como sospechoso ("ClickFix")?** Es un falso positivo por patrón: cualquier instrucción de "copiar y pegar en PowerShell" activa esa heurística, la use un sitio malicioso o un instalador legítimo (Winget, Scoop, Rust y Deno se instalan igual). Verifica el código fuente en [`install-apps.ps1`](https://github.com/javizcape/JWAD/blob/main/install-apps.ps1) antes de ejecutar cualquier one-liner remoto.
+> ⚠️ **¿Tu antivirus, navegador o uBlock Origin marcó este comando como sospechoso ("ClickFix")?** Es un falso positivo por patrón: cualquier instrucción de "copiar y pegar en PowerShell" activa esa heurística, la use un sitio malicioso o un instalador legítimo (Winget, Scoop, Rust y Deno se instalan igual). Verifica el código fuente en [`JWAD.ps1`](https://github.com/javizcape/JWAD/blob/main/JWAD.ps1) antes de ejecutar cualquier one-liner remoto.
 
 ---
 
@@ -101,6 +102,7 @@ iex (curl.exe -s https://javizcape.github.io/JWAD/install-apps.ps1 | Out-String)
 | 🔀 **Despliegue híbrido silencioso** | Prioriza instalación nativa vía **Winget**; recurre a extracción por **GitHub API** para apps sin instalador oficial empaquetado (ej. *FlyPhotos*, *AB Download Manager*) |
 | 🧪 **Gestión de errores integrada** | Captura códigos de salida de Windows (`0`, `3010`, etc.) para validar cada instalación antes de continuar |
 | 📄 **Reporte de auditoría** | Genera un JSON con hardware, rendimiento y estado final de cada aplicación |
+| 🎨 **Interfaz de consola renovada** | Banner ASCII de apertura (con firma reducida al cierre), salida UTF-8 garantizada para tipografía en bloque y una barra de progreso (`▐███░░░▌`) que marca el avance de cada una de las 14 instalaciones |
 
 ---
 
@@ -235,7 +237,7 @@ Algunos proveedores o políticas de DNS bloquean <code>irm</code>. Usa el métod
 <details>
 <summary><b>¿Por qué uBlock Origin u otro bloqueador marca el comando como "ClickFix"?</b></summary>
 <br>
-Es una detección heurística por patrón, no un análisis del script en sí: cualquier página que indique "abre PowerShell, pega esto y presiona Enter" activa la misma alerta, la use un sitio malicioso o un instalador legítimo como este. Verifica siempre el código fuente en <a href="https://github.com/javizcape/JWAD/blob/main/install-apps.ps1"><code>install-apps.ps1</code></a> antes de ejecutar cualquier one-liner remoto, sea de JWAD o de cualquier otro proyecto.
+Es una detección heurística por patrón, no un análisis del script en sí: cualquier página que indique "abre PowerShell, pega esto y presiona Enter" activa la misma alerta, la use un sitio malicioso o un instalador legítimo como este. Verifica siempre el código fuente en <a href="https://github.com/javizcape/JWAD/blob/main/JWAD.ps1"><code>JWAD.ps1</code></a> antes de ejecutar cualquier one-liner remoto, sea de JWAD o de cualquier otro proyecto.
 </details>
 
 <details>
