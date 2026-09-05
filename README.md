@@ -4,16 +4,15 @@
 
 <br>
 
-<!-- Reemplaza "javizcape/windows-app-deployer" por la ruta real de tu repositorio -->
 [![License: MIT](https://img.shields.io/badge/license-MIT-38bdf8.svg?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](#-requisitos)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)](#-ejecución-rápida)
 [![Winget](https://img.shields.io/badge/Winget-Ready-c084fc?style=for-the-badge&logo=windowsterminal&logoColor=white)](#-cómo-funciona)
 
-[![Stars](https://img.shields.io/github/stars/javizcape/windows-app-deployer?style=social)](../../stargazers)
-[![Forks](https://img.shields.io/github/forks/javizcape/windows-app-deployer?style=social)](../../network/members)
-[![Last Commit](https://img.shields.io/github/last-commit/javizcape/windows-app-deployer?color=38bdf8&label=último%20commit)](../../commits/main)
-[![Issues](https://img.shields.io/github/issues/javizcape/windows-app-deployer?color=f97316&label=issues)](../../issues)
+[![Stars](https://img.shields.io/github/stars/javizcape/.ps1?style=social)](../../stargazers)
+[![Forks](https://img.shields.io/github/forks/javizcape/.ps1?style=social)](../../network/members)
+[![Last Commit](https://img.shields.io/github/last-commit/javizcape/.ps1?color=38bdf8&label=último%20commit)](../../commits/main)
+[![Issues](https://img.shields.io/github/issues/javizcape/.ps1?color=f97316&label=issues)](../../issues)
 
 **Un solo comando. Un equipo Windows completamente listo para producción.**
 
@@ -134,8 +133,7 @@ flowchart LR
 
 El script automatiza la instalación de las siguientes herramientas esenciales, garantizando la descarga de la **última versión estable** de cada una:
 
-<details open>
-<summary><b>🧩 Requisitos de sistema</b></summary>
+#### 🧩 Requisitos de sistema
 
 | Aplicación | Descripción |
 |---|---|
@@ -143,20 +141,15 @@ El script automatiza la instalación de las siguientes herramientas esenciales, 
 | .NET Framework | Activación vía DISM sobre componentes nativos de Windows |
 | Java JRE x64 | Entorno de ejecución Java de 64 bits |
 
-</details>
-
-<details>
-<summary><b>🧰 Herramientas de sistema</b></summary>
+#### 🧰 Herramientas de sistema
 
 | Aplicación | Descripción |
 |---|---|
 | 7-Zip | Compresor/descompresor universal |
+| WinRAR x64 | Gestor de archivos comprimidos |
 | Bulk Crap Uninstaller | Desinstalación masiva y limpieza de residuos |
 
-</details>
-
-<details>
-<summary><b>🎬 Ofimática y multimedia</b></summary>
+#### 🎬 Ofimática y multimedia
 
 | Aplicación | Descripción |
 |---|---|
@@ -164,10 +157,7 @@ El script automatiza la instalación de las siguientes herramientas esenciales, 
 | VLC Media Player | Reproductor multimedia universal |
 | FlyPhotos | Visor de imágenes de alto rendimiento |
 
-</details>
-
-<details>
-<summary><b>🌐 Navegadores web</b></summary>
+#### 🌐 Navegadores web
 
 | Aplicación | Descripción |
 |---|---|
@@ -176,17 +166,11 @@ El script automatiza la instalación de las siguientes herramientas esenciales, 
 | Mullvad Browser | Navegador enfocado en anonimato |
 | Microsoft Edge | Navegador nativo de Windows |
 
-</details>
-
-<details>
-<summary><b>🔌 Utilidades de red</b></summary>
+#### 🔌 Utilidades de red
 
 | Aplicación | Descripción |
 |---|---|
-| WinRAR x64 | Gestor de archivos comprimidos |
 | AB Download Manager | Gestor de descargas con soporte multi-hilo |
-
-</details>
 
 ---
 
