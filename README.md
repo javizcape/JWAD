@@ -1,18 +1,18 @@
 <div align="center">
 
-<img src="assets/wad-banner.svg" alt="Windows App Deployer" width="100%">
+<img src="assets/wad-banner.svg" alt="JWAD — Windows App Deployer" width="100%">
 
 <br>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-38bdf8.svg?style=for-the-badge)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-ff9f1c.svg?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](#-requisitos)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)](#-ejecución-rápida)
-[![Winget](https://img.shields.io/badge/Winget-Ready-c084fc?style=for-the-badge&logo=windowsterminal&logoColor=white)](#-cómo-funciona)
+[![Winget](https://img.shields.io/badge/Winget-Ready-c97400?style=for-the-badge&logo=windowsterminal&logoColor=white)](#-cómo-funciona)
 
-[![Stars](https://img.shields.io/github/stars/javizcape/.ps1?style=social)](../../stargazers)
-[![Forks](https://img.shields.io/github/forks/javizcape/.ps1?style=social)](../../network/members)
-[![Last Commit](https://img.shields.io/github/last-commit/javizcape/.ps1?color=38bdf8&label=último%20commit)](../../commits/main)
-[![Issues](https://img.shields.io/github/issues/javizcape/.ps1?color=f97316&label=issues)](../../issues)
+[![Stars](https://img.shields.io/github/stars/javizcape/JWAD?style=social)](../../stargazers)
+[![Forks](https://img.shields.io/github/forks/javizcape/JWAD?style=social)](../../network/members)
+[![Last Commit](https://img.shields.io/github/last-commit/javizcape/JWAD?color=ff9f1c&label=último%20commit)](../../commits/main)
+[![Issues](https://img.shields.io/github/issues/javizcape/JWAD?color=f97316&label=issues)](../../issues)
 
 **Un solo comando. Un equipo Windows completamente listo para producción.**
 
@@ -28,7 +28,7 @@
 
 ## 📌 Tabla de contenidos
 
-- [¿Qué es WAD?](#-qué-es-wad)
+- [¿Qué es JWAD?](#-qué-es-jwad)
 - [Ejecución rápida](#-ejecución-rápida)
 - [Requisitos](#-requisitos)
 - [Características principales](#-características-principales)
@@ -44,9 +44,9 @@
 
 ---
 
-## 🧭 ¿Qué es WAD?
+## 🧭 ¿Qué es JWAD?
 
-**Windows App Deployer (WAD)** es un script de código abierto en PowerShell que automatiza, en un solo comando, la puesta a punto completa de un equipo Windows x64: instala software esencial de forma silenciosa, valida cada paso y entrega un reporte de diagnóstico en JSON con el estado del hardware y de la instalación.
+**JWAD (Windows App Deployer)** es un script de código abierto en PowerShell que automatiza, en un solo comando, la puesta a punto completa de un equipo Windows x64: instala software esencial de forma silenciosa, valida cada paso y entrega un reporte de diagnóstico en JSON con el estado del hardware y de la instalación.
 
 Pensado para técnicos, administradores de sistemas e integradores que necesitan dejar decenas de equipos configurados de manera **rápida, repetible y auditable**, sin clics manuales ni instaladores sueltos.
 
@@ -69,15 +69,17 @@ Pensado para técnicos, administradores de sistemas e integradores que necesitan
 
 **Windows 10 / 11 (x64):**
 ```powershell
-irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex
+irm https://javizcape.github.io/JWAD/install-apps.ps1 | iex
 ```
 
 **Alternativa** si tu red, ISP o DNS bloquean el comando anterior:
 ```powershell
-iex (curl.exe -s https://javizcape.github.io/.ps1/install-apps.ps1 | Out-String)
+iex (curl.exe -s https://javizcape.github.io/JWAD/install-apps.ps1 | Out-String)
 ```
 
 > 💡 **Tip:** ejecuta PowerShell **como Administrador** para evitar el paso extra de re-elevación.
+
+> ⚠️ **¿Tu antivirus, navegador o uBlock Origin marcó este comando como sospechoso ("ClickFix")?** Es un falso positivo por patrón: cualquier instrucción de "copiar y pegar en PowerShell" activa esa heurística, la use un sitio malicioso o un instalador legítimo (Winget, Scoop, Rust y Deno se instalan igual). Verifica el código fuente en [`install-apps.ps1`](https://github.com/javizcape/JWAD/blob/main/install-apps.ps1) antes de ejecutar cualquier one-liner remoto.
 
 ---
 
@@ -176,7 +178,7 @@ El script automatiza la instalación de las siguientes herramientas esenciales, 
 
 ## 📊 Reporte de telemetría
 
-Al finalizar, WAD genera `Reporte_Despliegue.json` en el **Escritorio**, con datos listos para auditoría del equipo:
+Al finalizar, JWAD genera `Reporte_Despliegue.json` en el **Escritorio**, con datos listos para auditoría del equipo:
 
 ```json
 {
@@ -231,9 +233,15 @@ Algunos proveedores o políticas de DNS bloquean <code>irm</code>. Usa el métod
 </details>
 
 <details>
+<summary><b>¿Por qué uBlock Origin u otro bloqueador marca el comando como "ClickFix"?</b></summary>
+<br>
+Es una detección heurística por patrón, no un análisis del script en sí: cualquier página que indique "abre PowerShell, pega esto y presiona Enter" activa la misma alerta, la use un sitio malicioso o un instalador legítimo como este. Verifica siempre el código fuente en <a href="https://github.com/javizcape/JWAD/blob/main/install-apps.ps1"><code>install-apps.ps1</code></a> antes de ejecutar cualquier one-liner remoto, sea de JWAD o de cualquier otro proyecto.
+</details>
+
+<details>
 <summary><b>¿Funciona en Windows en arquitectura ARM64?</b></summary>
 <br>
-No. WAD valida explícitamente <code>AMD64</code> y detiene la ejecución en cualquier otra arquitectura.
+No. JWAD valida explícitamente <code>AMD64</code> y detiene la ejecución en cualquier otra arquitectura.
 </details>
 
 <details>
