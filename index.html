@@ -8,26 +8,26 @@
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0b1220;
-    --bg-soft:#0e1a2e;
-    --surface:#101c33;
-    --surface-2:#132038;
-    --border:#1c2a42;
-    --border-strong:#25406b;
-    --text:#eef2f7;
-    --text-dim:#9fb3c8;
-    --text-faint:#5f7896;
-    --blue:#0078D6;
-    --cyan:#38bdf8;
-    --green:#3ddc84;
-    --amber:#facc15;
-    --red:#f87171;
-    --purple:#c084fc;
-    --mono:'JetBrains Mono', 'Consolas', monospace;
-    --sans:'Inter', -apple-system, 'Segoe UI', sans-serif;
+    --bg:#15171b;
+    --bg-alt:#1a1d22;
+    --surface:#1c1f25;
+    --surface-2:#22262d;
+    --border:#2e333b;
+    --border-strong:#454b55;
+    --text:#f2efe8;
+    --text-dim:#a9a49a;
+    --text-faint:#6d695f;
+    --amber:#ff9f1c;
+    --amber-deep:#c97400;
+    --amber-ink:#241300;
+    --teal:#5fb8ac;
+    --red:#e5595c;
+    --mono:'IBM Plex Mono', 'Consolas', monospace;
+    --sans:'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+    --display:'Big Shoulders Display', 'Arial Narrow', sans-serif;
     --maxw:1120px;
   }
 
@@ -36,8 +36,9 @@
   body{
     margin:0;
     background:
-      radial-gradient(1200px 600px at 15% -10%, rgba(56,189,248,0.08), transparent),
-      radial-gradient(1000px 500px at 100% 10%, rgba(192,132,252,0.06), transparent),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 64px),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 64px),
+      radial-gradient(900px 480px at 82% -8%, rgba(255,159,28,0.07), transparent),
       var(--bg);
     color:var(--text);
     font-family:var(--sans);
@@ -45,111 +46,130 @@
     -webkit-font-smoothing:antialiased;
   }
   img{max-width:100%; display:block;}
-  a{color:var(--cyan);}
-  ::selection{background:rgba(56,189,248,0.3); color:#fff;}
+  a{color:var(--amber);}
+  ::selection{background:rgba(255,159,28,0.32); color:#fff;}
 
   .wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px;}
   section{padding:96px 0;}
   section + section{border-top:1px solid var(--border);}
 
-  h1,h2,h3,h4{
-    font-family:var(--mono);
-    font-weight:700;
-    letter-spacing:-0.01em;
+  h1,h2{
+    font-family:var(--display);
+    font-weight:800;
+    letter-spacing:0.002em;
+    text-transform:uppercase;
     margin:0 0 16px;
     color:var(--text);
   }
-  h2{font-size:clamp(28px,4vw,36px);}
-  h3{font-size:19px; font-weight:600;}
+  h3,h4{
+    font-family:var(--sans);
+    font-weight:700;
+    margin:0 0 16px;
+    color:var(--text);
+  }
+  h2{font-size:clamp(30px,4.4vw,42px); line-height:1.02;}
+  h3{font-size:18px; font-weight:700;}
   p{max-width:66ch; color:var(--text-dim);}
-  .lede{font-size:18px; max-width:60ch;}
+  .lede{font-size:18px; max-width:58ch;}
   code, .mono{font-family:var(--mono);}
 
   .section-head{max-width:640px; margin-bottom:48px;}
   .section-head p{margin:0;}
+  .kicker{
+    font-family:var(--mono); font-size:12px; color:var(--amber);
+    display:block; margin-bottom:10px;
+  }
 
   /* ---------- Nav ---------- */
   header.nav{
     position:sticky; top:0; z-index:50;
-    background:rgba(11,18,32,0.82);
+    background:rgba(21,23,27,0.86);
     backdrop-filter:blur(10px);
     border-bottom:1px solid var(--border);
   }
   .nav-inner{
-    max-width:var(--maxw); margin:0 auto; padding:16px 24px;
+    max-width:var(--maxw); margin:0 auto; padding:14px 24px;
     display:flex; align-items:center; justify-content:space-between; gap:24px;
   }
   .brand{
-    display:flex; align-items:center; gap:10px;
-    font-family:var(--mono); font-weight:700; font-size:16px;
-    color:var(--text); text-decoration:none;
+    display:flex; align-items:center; gap:8px;
+    font-family:var(--display); font-weight:800; font-size:22px; letter-spacing:0.01em;
+    color:var(--text); text-decoration:none; text-transform:uppercase;
   }
   .brand .glyph{
-    color:var(--cyan); font-weight:800;
+    color:var(--amber); font-family:var(--mono); font-weight:700; font-size:15px;
   }
-  nav.links{display:flex; gap:28px; flex-wrap:wrap;}
+  nav.links{display:flex; gap:26px; flex-wrap:wrap;}
   nav.links a{
-    color:var(--text-dim); text-decoration:none; font-size:14px;
+    color:var(--text-dim); text-decoration:none; font-size:13.5px;
     padding:6px 0; border-bottom:2px solid transparent;
     transition:color .15s ease, border-color .15s ease;
   }
-  nav.links a:hover, nav.links a.active{color:var(--text); border-color:var(--cyan);}
-  .nav-cta{
-    display:flex; align-items:center; gap:12px;
-  }
+  nav.links a:hover, nav.links a.active{color:var(--text); border-color:var(--amber);}
+  .nav-cta{display:flex; align-items:center; gap:12px;}
 
   /* ---------- Buttons ---------- */
   .btn{
     display:inline-flex; align-items:center; gap:8px;
-    font-family:var(--sans); font-weight:600; font-size:14px;
-    padding:11px 18px; border-radius:8px; text-decoration:none;
+    font-family:var(--sans); font-weight:700; font-size:14px;
+    padding:12px 20px; border-radius:6px; text-decoration:none;
     border:1px solid transparent; cursor:pointer;
-    transition:transform .12s ease, background .15s ease, border-color .15s ease;
+    transition:transform .12s ease, background .15s ease, border-color .15s ease, box-shadow .2s ease;
   }
   .btn:active{transform:translateY(1px);}
-  .btn-primary{background:linear-gradient(135deg,var(--cyan),var(--blue)); color:#04101f;}
-  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-install{
+    background:var(--amber); color:var(--amber-ink);
+    box-shadow:0 0 0 3px rgba(255,159,28,0.18), 0 14px 28px -14px rgba(255,159,28,0.55);
+    font-size:15px; padding:15px 24px;
+  }
+  .btn-install:hover{background:#ffb047; box-shadow:0 0 0 4px rgba(255,159,28,0.24), 0 18px 32px -14px rgba(255,159,28,0.65);}
   .btn-outline{background:transparent; color:var(--text); border-color:var(--border-strong);}
-  .btn-outline:hover{border-color:var(--cyan); color:var(--cyan);}
+  .btn-outline:hover{border-color:var(--amber); color:var(--amber);}
   .btn-ghost{background:var(--surface); color:var(--text-dim); border-color:var(--border);}
   .btn-ghost:hover{color:var(--text);}
   .btn svg{width:15px; height:15px; flex:none;}
 
   /* ---------- Hero ---------- */
-  .hero{padding:88px 0 96px;}
+  .hero{padding:80px 0 96px;}
   .hero-grid{
     display:grid; grid-template-columns:1.05fr 0.95fr; gap:56px; align-items:center;
   }
-  .eyebrow-badges{
-    display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px;
-  }
+  .eyebrow-badges{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px;}
   .pill{
-    font-family:var(--mono); font-size:12px; padding:5px 10px; border-radius:999px;
+    font-family:var(--mono); font-size:11.5px; padding:5px 10px; border-radius:3px;
     border:1px solid var(--border-strong); color:var(--text-dim);
   }
-  .hero h1{
-    font-size:clamp(38px,5.2vw,58px); line-height:1.05; margin-bottom:20px;
-  }
-  .hero-actions{display:flex; gap:12px; flex-wrap:wrap; margin-top:32px;}
+  .hero h1{font-size:clamp(42px,6vw,66px); line-height:0.96; margin-bottom:20px;}
+  .hero-actions{display:flex; gap:12px; flex-wrap:wrap; margin-top:32px; align-items:center;}
   .hero-stats{
     display:flex; gap:28px; margin-top:40px; padding-top:28px; border-top:1px solid var(--border);
   }
-  .hero-stats div{border-left:2px solid var(--border-strong); padding-left:14px;}
-  .hero-stats strong{display:block; font-family:var(--mono); font-size:20px; color:var(--text);}
-  .hero-stats span{font-size:13px; color:var(--text-faint);}
+  .hero-stats div{border-left:2px solid var(--amber-deep); padding-left:14px;}
+  .hero-stats strong{display:block; font-family:var(--display); font-weight:800; font-size:24px; color:var(--text);}
+  .hero-stats span{font-size:12.5px; color:var(--text-faint);}
 
-  /* terminal mock */
+  /* nameplate / terminal panel */
+  .nameplate{position:relative; padding:10px;}
+  .nameplate::before, .nameplate::after,
+  .nameplate .rivet-tr, .nameplate .rivet-bl{
+    content:""; position:absolute; width:7px; height:7px; border-radius:50%;
+    background:var(--border-strong); box-shadow:inset 0 1px 1px rgba(0,0,0,0.6);
+  }
+  .nameplate::before{top:6px; left:6px;}
+  .nameplate::after{bottom:6px; right:6px;}
+  .nameplate .rivet-tr{top:6px; right:6px;}
+  .nameplate .rivet-bl{bottom:6px; left:6px;}
   .terminal{
-    background:#070d18; border:1px solid var(--border-strong); border-radius:12px;
-    box-shadow:0 30px 60px -30px rgba(0,0,0,0.6);
+    background:#0e1013; border:1px solid var(--border-strong); border-radius:8px;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,0.7);
     overflow:hidden;
   }
   .terminal .bar{
     display:flex; align-items:center; gap:8px; padding:12px 16px;
     background:var(--surface-2); border-bottom:1px solid var(--border);
   }
-  .terminal .dot{width:10px; height:10px; border-radius:50%;}
-  .terminal .dot.r{background:#ef4444;} .terminal .dot.y{background:#eab308;} .terminal .dot.g{background:#22c55e;}
+  .terminal .dot{width:9px; height:9px; border-radius:50%;}
+  .terminal .dot.r{background:#e5595c;} .terminal .dot.y{background:var(--amber);} .terminal .dot.g{background:var(--teal);}
   .terminal .title{margin-left:8px; font-family:var(--mono); font-size:12px; color:var(--text-faint);}
   .terminal .body{padding:22px 20px; font-family:var(--mono); font-size:13.5px;}
   .terminal .ln{opacity:0; transform:translateY(4px); animation:tln .45s ease forwards;}
@@ -161,27 +181,27 @@
   .terminal .ln:nth-child(6){animation-delay:2.15s;}
   .terminal .ln:nth-child(7){animation-delay:2.55s;}
   @keyframes tln{to{opacity:1; transform:none;}}
-  .p{color:var(--cyan);}
-  .ok{color:var(--green);}
-  .go{color:var(--amber);}
+  .p{color:var(--amber);}
+  .ok{color:var(--teal);}
+  .go{color:#f2c14e;}
   .dim{color:var(--text-faint);}
-  .cursor{display:inline-block; width:7px; height:14px; background:var(--cyan); vertical-align:-2px; animation:blink 1s step-end infinite;}
+  .cursor{display:inline-block; width:7px; height:14px; background:var(--amber); vertical-align:-2px; animation:blink 1s step-end infinite;}
   @keyframes blink{50%{opacity:0;}}
 
-  /* ---------- Why grid (asymmetric, not cards) ---------- */
+  /* ---------- Why grid ---------- */
   .why-grid{display:grid; grid-template-columns:0.9fr 1.1fr; gap:64px; align-items:start;}
   .spec-list{border-top:1px solid var(--border);}
   .spec-row{
-    display:grid; grid-template-columns:28px 1fr; gap:16px;
+    display:grid; grid-template-columns:30px 1fr; gap:16px;
     padding:20px 0; border-bottom:1px solid var(--border);
   }
-  .spec-row .glyph{font-family:var(--mono); color:var(--cyan); font-weight:700;}
+  .spec-row .glyph{font-family:var(--mono); color:var(--amber); font-weight:700; font-size:16px;}
   .spec-row h3{margin:0 0 6px;}
   .spec-row p{margin:0; font-size:15px;}
 
   /* ---------- Install ---------- */
   .code-block{
-    background:#070d18; border:1px solid var(--border-strong); border-radius:10px;
+    background:#0e1013; border:1px solid var(--border-strong); border-radius:8px;
     overflow:hidden; margin:20px 0;
   }
   .code-block .head{
@@ -191,27 +211,41 @@
   .code-block .head span{font-family:var(--mono); font-size:12px; color:var(--text-faint);}
   .code-block pre{margin:0; padding:20px; overflow-x:auto; font-family:var(--mono); font-size:14px; color:var(--text);}
   .copy-btn{
-    font-family:var(--sans); font-size:12px; font-weight:600; color:var(--text-dim);
-    background:transparent; border:1px solid var(--border-strong); border-radius:6px;
+    font-family:var(--sans); font-size:12px; font-weight:700; color:var(--text-dim);
+    background:transparent; border:1px solid var(--border-strong); border-radius:5px;
     padding:5px 10px; cursor:pointer; transition:.15s;
   }
-  .copy-btn:hover{color:var(--cyan); border-color:var(--cyan);}
-  .copy-btn.copied{color:var(--green); border-color:var(--green);}
+  .copy-btn:hover{color:var(--amber); border-color:var(--amber);}
+  .copy-btn.copied{color:var(--teal); border-color:var(--teal);}
   .note{
     font-size:14px; color:var(--text-faint); border-left:2px solid var(--border-strong);
     padding-left:14px; margin-top:24px;
   }
+  .verify-box{
+    display:flex; flex-wrap:wrap; gap:12px 32px; align-items:center;
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:16px 18px; margin:28px 0;
+  }
+  .verify-box .vi{flex:1; min-width:220px;}
+  .verify-box .vi span{display:block; font-size:12px; color:var(--text-faint); margin-bottom:4px;}
+  .verify-box .vi code{font-size:12.5px; color:var(--text-dim); word-break:break-all;}
+  .safety-callout{
+    background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--amber);
+    border-radius:0 8px 8px 0; padding:18px 20px; margin:28px 0;
+  }
+  .safety-callout h3{font-size:15px; margin-bottom:8px;}
+  .safety-callout p{margin:0; font-size:14px;}
   .req-list{list-style:none; padding:0; margin:24px 0 0; display:grid; grid-template-columns:1fr 1fr; gap:14px 32px;}
   .req-list li{display:flex; gap:10px; align-items:flex-start; color:var(--text-dim); font-size:15px;}
-  .req-list li::before{content:"✓"; color:var(--green); font-family:var(--mono); font-weight:700;}
+  .req-list li::before{content:"✓"; color:var(--teal); font-family:var(--mono); font-weight:700;}
 
   /* ---------- Features ---------- */
   .feature-list{border-top:1px solid var(--border);}
   .feature-row{
-    display:grid; grid-template-columns:220px 1fr; gap:32px;
+    display:grid; grid-template-columns:200px 1fr; gap:32px;
     padding:28px 0; border-bottom:1px solid var(--border);
   }
-  .feature-row .tag{font-family:var(--mono); font-size:13px; color:var(--cyan);}
+  .feature-row .tag{font-family:var(--mono); font-size:12.5px; color:var(--amber);}
   .feature-row h3{margin:6px 0 8px;}
   .feature-row p{margin:0; font-size:15px;}
 
@@ -227,14 +261,14 @@
     position:absolute; left:-44px; top:0; width:32px; height:32px; border-radius:50%;
     background:var(--surface-2); border:1px solid var(--border-strong);
     display:flex; align-items:center; justify-content:center;
-    font-family:var(--mono); font-size:13px; color:var(--cyan);
+    font-family:var(--mono); font-size:13px; color:var(--amber);
   }
   .flow-step h3{margin:0 0 6px; font-size:16px;}
   .flow-step p{margin:0; font-size:14.5px;}
 
   /* ---------- Software catalog ---------- */
   .cat-grid{display:grid; grid-template-columns:1fr 1fr; gap:28px;}
-  .cat{border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--surface);}
+  .cat{border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--surface);}
   .cat h3{
     margin:0; padding:16px 18px; background:var(--surface-2);
     border-bottom:1px solid var(--border); font-size:15px;
@@ -242,28 +276,28 @@
   }
   table{width:100%; border-collapse:collapse;}
   table td{padding:12px 18px; font-size:14px; border-top:1px solid var(--border); color:var(--text-dim);}
-  table tr td:first-child{color:var(--text); font-weight:500; width:44%;}
+  table tr td:first-child{color:var(--text); font-weight:600; width:44%;}
 
   /* ---------- Telemetry ---------- */
   .telemetry-grid{display:grid; grid-template-columns:1fr 1fr; gap:40px; align-items:start;}
   .readout{display:flex; margin-bottom:28px;}
   .readout div{flex:1; padding:0 20px; border-left:1px solid var(--border);}
   .readout div:first-child{padding-left:0; border-left:none;}
-  .readout .val{font-family:var(--mono); font-size:26px; color:var(--text);}
+  .readout .val{font-family:var(--display); font-weight:800; font-size:28px; color:var(--text);}
   .readout .lbl{font-size:12.5px; color:var(--text-faint);}
   pre.json{
-    background:#070d18; border:1px solid var(--border-strong); border-radius:10px;
+    background:#0e1013; border:1px solid var(--border-strong); border-radius:8px;
     padding:20px; font-family:var(--mono); font-size:13px; overflow-x:auto; margin:0;
     color:var(--text-dim);
   }
-  pre.json .k{color:var(--cyan);}
-  pre.json .s{color:var(--green);}
-  pre.json .n{color:var(--amber);}
+  pre.json .k{color:var(--amber);}
+  pre.json .s{color:var(--teal);}
+  pre.json .n{color:#f2c14e;}
   .telemetry-list{list-style:none; padding:0; margin:0;}
   .telemetry-list li{
     padding:14px 0; border-bottom:1px solid var(--border); font-size:15px; color:var(--text-dim);
   }
-  .telemetry-list strong{color:var(--text); font-weight:600;}
+  .telemetry-list strong{color:var(--text); font-weight:700;}
 
   /* ---------- Custom ---------- */
   .plain-list{padding-left:20px; color:var(--text-dim); font-size:15px;}
@@ -273,14 +307,14 @@
   details.faq{border-bottom:1px solid var(--border); padding:18px 0;}
   details.faq summary{
     list-style:none; cursor:pointer; display:flex; justify-content:space-between; align-items:center;
-    font-family:var(--sans); font-weight:600; font-size:16px; color:var(--text);
+    font-family:var(--sans); font-weight:700; font-size:16px; color:var(--text);
   }
   details.faq summary::-webkit-details-marker{display:none;}
   details.faq summary::after{
     content:"+"; font-family:var(--mono); font-size:20px; color:var(--text-faint);
     transition:transform .2s ease;
   }
-  details.faq[open] summary::after{transform:rotate(45deg); color:var(--cyan);}
+  details.faq[open] summary::after{transform:rotate(45deg); color:var(--amber);}
   details.faq p{margin:14px 0 0; font-size:15px;}
 
   /* ---------- Roadmap ---------- */
@@ -289,7 +323,7 @@
     display:flex; align-items:center; gap:14px; padding:14px 0; border-bottom:1px solid var(--border);
     font-size:15px; color:var(--text-dim);
   }
-  .box{width:18px; height:18px; border:1.5px solid var(--border-strong); border-radius:4px; flex:none;}
+  .box{width:18px; height:18px; border:1.5px solid var(--border-strong); border-radius:3px; flex:none;}
 
   /* ---------- Contributing ---------- */
   .contrib-grid{display:grid; grid-template-columns:1.1fr 0.9fr; gap:56px;}
@@ -309,7 +343,7 @@
     opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease; z-index:40;
   }
   #top-btn.show{opacity:1; pointer-events:auto;}
-  #top-btn:hover{border-color:var(--cyan); color:var(--cyan);}
+  #top-btn:hover{border-color:var(--amber); color:var(--amber);}
 
   @media (max-width:860px){
     .hero-grid, .why-grid, .telemetry-grid, .contrib-grid{grid-template-columns:1fr;}
@@ -331,7 +365,7 @@
 
 <header class="nav">
   <div class="nav-inner">
-    <a href="#top" class="brand"><span class="glyph">&gt;_</span> WAD</a>
+    <a href="#top" class="brand"><span class="glyph">&gt;_</span>WAD</a>
     <nav class="links">
       <a href="#instalacion">Instalación</a>
       <a href="#caracteristicas">Características</a>
@@ -360,7 +394,7 @@
         <h1>Windows App Deployer</h1>
         <p class="lede">Un script de código abierto que instala, valida y audita el software esencial de un equipo Windows en un solo comando — sin clics, sin instaladores sueltos, sin sorpresas.</p>
         <div class="hero-actions">
-          <button class="btn btn-primary" onclick="copyCmd('cmd-hero')">
+          <button class="btn btn-install" onclick="copyCmd('cmd-hero')" id="btn-cmd-hero-hero">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Copiar comando de instalación
           </button>
@@ -373,19 +407,22 @@
         </div>
       </div>
 
-      <div class="terminal">
-        <div class="bar">
-          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-          <span class="title">Administrador: Windows PowerShell</span>
-        </div>
-        <div class="body" id="cmd-hero-view">
-          <div class="ln"><span class="p">PS C:\&gt;</span> irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex</div>
-          <div class="ln dim">&nbsp;</div>
-          <div class="ln ok">[OK] Arquitectura AMD64 verificada</div>
-          <div class="ln ok">[OK] Permisos de administrador confirmados</div>
-          <div class="ln go">[..] Instalando Google Chrome vía Winget</div>
-          <div class="ln go">[..] Extrayendo FlyPhotos desde GitHub API</div>
-          <div class="ln ok">[OK] Reporte_Despliegue.json generado <span class="cursor"></span></div>
+      <div class="nameplate">
+        <span class="rivet-tr"></span><span class="rivet-bl"></span>
+        <div class="terminal">
+          <div class="bar">
+            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+            <span class="title">Administrador: Windows PowerShell</span>
+          </div>
+          <div class="body" id="cmd-hero-view">
+            <div class="ln"><span class="p">PS C:\&gt;</span> irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex</div>
+            <div class="ln dim">&nbsp;</div>
+            <div class="ln ok">[OK] Arquitectura AMD64 verificada</div>
+            <div class="ln ok">[OK] Permisos de administrador confirmados</div>
+            <div class="ln go">[..] Instalando Google Chrome vía Winget</div>
+            <div class="ln go">[..] Extrayendo FlyPhotos desde GitHub API</div>
+            <div class="ln ok">[OK] Reporte_Despliegue.json generado <span class="cursor"></span></div>
+          </div>
         </div>
       </div>
     </div>
@@ -400,19 +437,19 @@
       </div>
       <div class="spec-list">
         <div class="spec-row">
-          <span class="glyph">01</span>
+          <span class="glyph">&gt;_</span>
           <div><h3>Cero interacción</h3><p>Todo el flujo corre desapercibido, sin ventanas de instalación que interrumpan al técnico.</p></div>
         </div>
         <div class="spec-row">
-          <span class="glyph">02</span>
+          <span class="glyph">^</span>
           <div><h3>Auto-elevación UAC</h3><p>Detecta permisos insuficientes y se relanza como Administrador sin intervención manual.</p></div>
         </div>
         <div class="spec-row">
-          <span class="glyph">03</span>
+          <span class="glyph">⇄</span>
           <div><h3>Híbrido Winget + GitHub API</h3><p>Usa el repositorio oficial de Microsoft y recurre a releases de GitHub cuando no hay paquete.</p></div>
         </div>
         <div class="spec-row">
-          <span class="glyph">04</span>
+          <span class="glyph">~</span>
           <div><h3>Telemetría real</h3><p>CPU, RAM, disco y temperatura vía WMI/CIM entregados en un reporte JSON al finalizar.</p></div>
         </div>
       </div>
@@ -441,6 +478,22 @@
           <button class="copy-btn" id="btn-cmd-alt" onclick="copyCmd('cmd-alt')">Copiar</button>
         </div>
         <pre id="cmd-alt">iex (curl.exe -s https://javizcape.github.io/.ps1/install-apps.ps1 | Out-String)</pre>
+      </div>
+
+      <div class="verify-box">
+        <div class="vi">
+          <span>Código fuente auditable</span>
+          <code><a href="https://github.com/javizcape/.ps1/blob/main/install-apps.ps1" target="_blank" rel="noopener">github.com/javizcape/.ps1/install-apps.ps1</a></code>
+        </div>
+        <div class="vi">
+          <span>Verificación (SHA-256 del release actual)</span>
+          <code>Publicado junto a cada release en GitHub — compáralo antes de ejecutar</code>
+        </div>
+      </div>
+
+      <div class="safety-callout">
+        <h3>¿Tu navegador o uBlock Origin marcó este comando como sospechoso?</h3>
+        <p>Es un falso positivo conocido como "ClickFix": los bloqueadores detectan cualquier instrucción de "copiar y pegar en PowerShell" porque ese mismo patrón lo usan sitios maliciosos. Winget, Scoop, Rust y Deno se instalan con comandos casi idénticos. Antes de ejecutar, revisa el código fuente enlazado arriba — es la forma correcta de confirmar que un one-liner es seguro, no la advertencia del bloqueador.</p>
       </div>
 
       <p class="note">Ejecuta PowerShell directamente como Administrador para evitar el paso extra de re-elevación.</p>
@@ -669,6 +722,14 @@
           <p>Algunos proveedores o políticas de DNS bloquean <code>irm</code>. Usa el método alternativo con <code>curl.exe</code> de la sección de instalación.</p>
         </details>
         <details class="faq">
+          <summary>¿Por qué uBlock Origin u otro bloqueador marca el comando como "ClickFix"?</summary>
+          <p>Es una detección heurística por patrón, no un análisis del script en sí: cualquier página que diga "abre PowerShell, pega esto y presiona Enter" activa la misma alerta, la use un sitio malicioso o un instalador legítimo como este. Verifica siempre el código fuente enlazado en la sección de instalación antes de ejecutar cualquier one-liner remoto, sea de WAD o de cualquier otro proyecto.</p>
+        </details>
+        <details class="faq">
+          <summary>¿Puedo copiar el comando si el navegador bloquea el acceso al portapapeles?</summary>
+          <p>Sí. Si la API de portapapeles está bloqueada por una extensión, el botón "Copiar" recurre automáticamente a un método alternativo. Si aun así falla, selecciona el texto del bloque de comando manualmente con el mouse.</p>
+        </details>
+        <details class="faq">
           <summary>¿Funciona en Windows con arquitectura ARM64?</summary>
           <p>No. WAD valida explícitamente AMD64 y detiene la ejecución en cualquier otra arquitectura.</p>
         </details>
@@ -730,7 +791,7 @@
       </div>
       <div class="footer-links">
         <a class="btn btn-outline" href="https://github.com/javizcape" target="_blank" rel="noopener">GitHub</a>
-        <a class="btn btn-primary" href="https://github.com/javizcape/.ps1" target="_blank" rel="noopener">Dar una estrella</a>
+        <a class="btn btn-install" href="https://github.com/javizcape/.ps1" target="_blank" rel="noopener">Dar una estrella</a>
       </div>
     </div>
     <div class="fine">Licencia MIT. Windows App Deployer, 2026.</div>
@@ -747,17 +808,49 @@
     'cmd-alt': 'iex (curl.exe -s https://javizcape.github.io/.ps1/install-apps.ps1 | Out-String)'
   };
 
+  function fallbackCopy(text){
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.left = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function flashCopied(id){
+    const btn = document.getElementById('btn-' + id);
+    if(btn){
+      const original = btn.textContent;
+      btn.textContent = '¡Copiado!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1800);
+    }
+    const heroBtn = document.getElementById('btn-' + id + '-hero');
+    if(heroBtn){
+      const original = heroBtn.innerHTML;
+      heroBtn.innerHTML = '¡Comando copiado!';
+      setTimeout(() => { heroBtn.innerHTML = original; }, 1800);
+    }
+  }
+
+  // Some privacy/security extensions (e.g. uBlock's ClickFix guard) block navigator.clipboard
+  // on pages matching this content pattern, so we fall back to execCommand when needed.
   function copyCmd(id){
     const text = commands[id];
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = document.getElementById('btn-' + id);
-      if(btn){
-        const original = btn.textContent;
-        btn.textContent = '¡Copiado!';
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1800);
-      }
-    }).catch(() => {});
+    if(navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text).then(() => flashCopied(id)).catch(() => {
+        if(fallbackCopy(text)) flashCopied(id);
+      });
+    } else {
+      if(fallbackCopy(text)) flashCopied(id);
+    }
   }
 
   // Back to top visibility
