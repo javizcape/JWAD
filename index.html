@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Windows App Deployer (WAD) — Despliegue masivo para Windows x64</title>
+<meta name="description" content="Script de código abierto en PowerShell para instalar software esencial en Windows x64 de forma silenciosa, automatizada y auditable.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b1220;
+    --bg-soft:#0e1a2e;
+    --surface:#101c33;
+    --surface-2:#132038;
+    --border:#1c2a42;
+    --border-strong:#25406b;
+    --text:#eef2f7;
+    --text-dim:#9fb3c8;
+    --text-faint:#5f7896;
+    --blue:#0078D6;
+    --cyan:#38bdf8;
+    --green:#3ddc84;
+    --amber:#facc15;
+    --red:#f87171;
+    --purple:#c084fc;
+    --mono:'JetBrains Mono', 'Consolas', monospace;
+    --sans:'Inter', -apple-system, 'Segoe UI', sans-serif;
+    --maxw:1120px;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(56,189,248,0.08), transparent),
+      radial-gradient(1000px 500px at 100% 10%, rgba(192,132,252,0.06), transparent),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  img{max-width:100%; display:block;}
+  a{color:var(--cyan);}
+  ::selection{background:rgba(56,189,248,0.3); color:#fff;}
+
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px;}
+  section{padding:96px 0;}
+  section + section{border-top:1px solid var(--border);}
+
+  h1,h2,h3,h4{
+    font-family:var(--mono);
+    font-weight:700;
+    letter-spacing:-0.01em;
+    margin:0 0 16px;
+    color:var(--text);
+  }
+  h2{font-size:clamp(28px,4vw,36px);}
+  h3{font-size:19px; font-weight:600;}
+  p{max-width:66ch; color:var(--text-dim);}
+  .lede{font-size:18px; max-width:60ch;}
+  code, .mono{font-family:var(--mono);}
+
+  .section-head{max-width:640px; margin-bottom:48px;}
+  .section-head p{margin:0;}
+
+  /* ---------- Nav ---------- */
+  header.nav{
+    position:sticky; top:0; z-index:50;
+    background:rgba(11,18,32,0.82);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--border);
+  }
+  .nav-inner{
+    max-width:var(--maxw); margin:0 auto; padding:16px 24px;
+    display:flex; align-items:center; justify-content:space-between; gap:24px;
+  }
+  .brand{
+    display:flex; align-items:center; gap:10px;
+    font-family:var(--mono); font-weight:700; font-size:16px;
+    color:var(--text); text-decoration:none;
+  }
+  .brand .glyph{
+    color:var(--cyan); font-weight:800;
+  }
+  nav.links{display:flex; gap:28px; flex-wrap:wrap;}
+  nav.links a{
+    color:var(--text-dim); text-decoration:none; font-size:14px;
+    padding:6px 0; border-bottom:2px solid transparent;
+    transition:color .15s ease, border-color .15s ease;
+  }
+  nav.links a:hover, nav.links a.active{color:var(--text); border-color:var(--cyan);}
+  .nav-cta{
+    display:flex; align-items:center; gap:12px;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display:inline-flex; align-items:center; gap:8px;
+    font-family:var(--sans); font-weight:600; font-size:14px;
+    padding:11px 18px; border-radius:8px; text-decoration:none;
+    border:1px solid transparent; cursor:pointer;
+    transition:transform .12s ease, background .15s ease, border-color .15s ease;
+  }
+  .btn:active{transform:translateY(1px);}
+  .btn-primary{background:linear-gradient(135deg,var(--cyan),var(--blue)); color:#04101f;}
+  .btn-primary:hover{filter:brightness(1.08);}
+  .btn-outline{background:transparent; color:var(--text); border-color:var(--border-strong);}
+  .btn-outline:hover{border-color:var(--cyan); color:var(--cyan);}
+  .btn-ghost{background:var(--surface); color:var(--text-dim); border-color:var(--border);}
+  .btn-ghost:hover{color:var(--text);}
+  .btn svg{width:15px; height:15px; flex:none;}
+
+  /* ---------- Hero ---------- */
+  .hero{padding:88px 0 96px;}
+  .hero-grid{
+    display:grid; grid-template-columns:1.05fr 0.95fr; gap:56px; align-items:center;
+  }
+  .eyebrow-badges{
+    display:flex; gap:8px; flex-wrap:wrap; margin-bottom:22px;
+  }
+  .pill{
+    font-family:var(--mono); font-size:12px; padding:5px 10px; border-radius:999px;
+    border:1px solid var(--border-strong); color:var(--text-dim);
+  }
+  .hero h1{
+    font-size:clamp(38px,5.2vw,58px); line-height:1.05; margin-bottom:20px;
+  }
+  .hero-actions{display:flex; gap:12px; flex-wrap:wrap; margin-top:32px;}
+  .hero-stats{
+    display:flex; gap:28px; margin-top:40px; padding-top:28px; border-top:1px solid var(--border);
+  }
+  .hero-stats div{border-left:2px solid var(--border-strong); padding-left:14px;}
+  .hero-stats strong{display:block; font-family:var(--mono); font-size:20px; color:var(--text);}
+  .hero-stats span{font-size:13px; color:var(--text-faint);}
+
+  /* terminal mock */
+  .terminal{
+    background:#070d18; border:1px solid var(--border-strong); border-radius:12px;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,0.6);
+    overflow:hidden;
+  }
+  .terminal .bar{
+    display:flex; align-items:center; gap:8px; padding:12px 16px;
+    background:var(--surface-2); border-bottom:1px solid var(--border);
+  }
+  .terminal .dot{width:10px; height:10px; border-radius:50%;}
+  .terminal .dot.r{background:#ef4444;} .terminal .dot.y{background:#eab308;} .terminal .dot.g{background:#22c55e;}
+  .terminal .title{margin-left:8px; font-family:var(--mono); font-size:12px; color:var(--text-faint);}
+  .terminal .body{padding:22px 20px; font-family:var(--mono); font-size:13.5px;}
+  .terminal .ln{opacity:0; transform:translateY(4px); animation:tln .45s ease forwards;}
+  .terminal .ln:nth-child(1){animation-delay:.15s;}
+  .terminal .ln:nth-child(2){animation-delay:.55s;}
+  .terminal .ln:nth-child(3){animation-delay:.95s;}
+  .terminal .ln:nth-child(4){animation-delay:1.35s;}
+  .terminal .ln:nth-child(5){animation-delay:1.75s;}
+  .terminal .ln:nth-child(6){animation-delay:2.15s;}
+  .terminal .ln:nth-child(7){animation-delay:2.55s;}
+  @keyframes tln{to{opacity:1; transform:none;}}
+  .p{color:var(--cyan);}
+  .ok{color:var(--green);}
+  .go{color:var(--amber);}
+  .dim{color:var(--text-faint);}
+  .cursor{display:inline-block; width:7px; height:14px; background:var(--cyan); vertical-align:-2px; animation:blink 1s step-end infinite;}
+  @keyframes blink{50%{opacity:0;}}
+
+  /* ---------- Why grid (asymmetric, not cards) ---------- */
+  .why-grid{display:grid; grid-template-columns:0.9fr 1.1fr; gap:64px; align-items:start;}
+  .spec-list{border-top:1px solid var(--border);}
+  .spec-row{
+    display:grid; grid-template-columns:28px 1fr; gap:16px;
+    padding:20px 0; border-bottom:1px solid var(--border);
+  }
+  .spec-row .glyph{font-family:var(--mono); color:var(--cyan); font-weight:700;}
+  .spec-row h3{margin:0 0 6px;}
+  .spec-row p{margin:0; font-size:15px;}
+
+  /* ---------- Install ---------- */
+  .code-block{
+    background:#070d18; border:1px solid var(--border-strong); border-radius:10px;
+    overflow:hidden; margin:20px 0;
+  }
+  .code-block .head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 16px; background:var(--surface-2); border-bottom:1px solid var(--border);
+  }
+  .code-block .head span{font-family:var(--mono); font-size:12px; color:var(--text-faint);}
+  .code-block pre{margin:0; padding:20px; overflow-x:auto; font-family:var(--mono); font-size:14px; color:var(--text);}
+  .copy-btn{
+    font-family:var(--sans); font-size:12px; font-weight:600; color:var(--text-dim);
+    background:transparent; border:1px solid var(--border-strong); border-radius:6px;
+    padding:5px 10px; cursor:pointer; transition:.15s;
+  }
+  .copy-btn:hover{color:var(--cyan); border-color:var(--cyan);}
+  .copy-btn.copied{color:var(--green); border-color:var(--green);}
+  .note{
+    font-size:14px; color:var(--text-faint); border-left:2px solid var(--border-strong);
+    padding-left:14px; margin-top:24px;
+  }
+  .req-list{list-style:none; padding:0; margin:24px 0 0; display:grid; grid-template-columns:1fr 1fr; gap:14px 32px;}
+  .req-list li{display:flex; gap:10px; align-items:flex-start; color:var(--text-dim); font-size:15px;}
+  .req-list li::before{content:"✓"; color:var(--green); font-family:var(--mono); font-weight:700;}
+
+  /* ---------- Features ---------- */
+  .feature-list{border-top:1px solid var(--border);}
+  .feature-row{
+    display:grid; grid-template-columns:220px 1fr; gap:32px;
+    padding:28px 0; border-bottom:1px solid var(--border);
+  }
+  .feature-row .tag{font-family:var(--mono); font-size:13px; color:var(--cyan);}
+  .feature-row h3{margin:6px 0 8px;}
+  .feature-row p{margin:0; font-size:15px;}
+
+  /* ---------- How it works ---------- */
+  .flow{position:relative; padding-left:44px;}
+  .flow::before{
+    content:""; position:absolute; left:15px; top:6px; bottom:6px; width:2px;
+    background:linear-gradient(var(--border-strong), var(--border));
+  }
+  .flow-step{position:relative; padding-bottom:36px;}
+  .flow-step:last-child{padding-bottom:0;}
+  .flow-step .num{
+    position:absolute; left:-44px; top:0; width:32px; height:32px; border-radius:50%;
+    background:var(--surface-2); border:1px solid var(--border-strong);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:13px; color:var(--cyan);
+  }
+  .flow-step h3{margin:0 0 6px; font-size:16px;}
+  .flow-step p{margin:0; font-size:14.5px;}
+
+  /* ---------- Software catalog ---------- */
+  .cat-grid{display:grid; grid-template-columns:1fr 1fr; gap:28px;}
+  .cat{border:1px solid var(--border); border-radius:10px; overflow:hidden; background:var(--surface);}
+  .cat h3{
+    margin:0; padding:16px 18px; background:var(--surface-2);
+    border-bottom:1px solid var(--border); font-size:15px;
+    display:flex; align-items:center; gap:10px;
+  }
+  table{width:100%; border-collapse:collapse;}
+  table td{padding:12px 18px; font-size:14px; border-top:1px solid var(--border); color:var(--text-dim);}
+  table tr td:first-child{color:var(--text); font-weight:500; width:44%;}
+
+  /* ---------- Telemetry ---------- */
+  .telemetry-grid{display:grid; grid-template-columns:1fr 1fr; gap:40px; align-items:start;}
+  .readout{display:flex; margin-bottom:28px;}
+  .readout div{flex:1; padding:0 20px; border-left:1px solid var(--border);}
+  .readout div:first-child{padding-left:0; border-left:none;}
+  .readout .val{font-family:var(--mono); font-size:26px; color:var(--text);}
+  .readout .lbl{font-size:12.5px; color:var(--text-faint);}
+  pre.json{
+    background:#070d18; border:1px solid var(--border-strong); border-radius:10px;
+    padding:20px; font-family:var(--mono); font-size:13px; overflow-x:auto; margin:0;
+    color:var(--text-dim);
+  }
+  pre.json .k{color:var(--cyan);}
+  pre.json .s{color:var(--green);}
+  pre.json .n{color:var(--amber);}
+  .telemetry-list{list-style:none; padding:0; margin:0;}
+  .telemetry-list li{
+    padding:14px 0; border-bottom:1px solid var(--border); font-size:15px; color:var(--text-dim);
+  }
+  .telemetry-list strong{color:var(--text); font-weight:600;}
+
+  /* ---------- Custom ---------- */
+  .plain-list{padding-left:20px; color:var(--text-dim); font-size:15px;}
+  .plain-list li{margin-bottom:10px;}
+
+  /* ---------- FAQ ---------- */
+  details.faq{border-bottom:1px solid var(--border); padding:18px 0;}
+  details.faq summary{
+    list-style:none; cursor:pointer; display:flex; justify-content:space-between; align-items:center;
+    font-family:var(--sans); font-weight:600; font-size:16px; color:var(--text);
+  }
+  details.faq summary::-webkit-details-marker{display:none;}
+  details.faq summary::after{
+    content:"+"; font-family:var(--mono); font-size:20px; color:var(--text-faint);
+    transition:transform .2s ease;
+  }
+  details.faq[open] summary::after{transform:rotate(45deg); color:var(--cyan);}
+  details.faq p{margin:14px 0 0; font-size:15px;}
+
+  /* ---------- Roadmap ---------- */
+  .roadmap{list-style:none; padding:0; margin:0;}
+  .roadmap li{
+    display:flex; align-items:center; gap:14px; padding:14px 0; border-bottom:1px solid var(--border);
+    font-size:15px; color:var(--text-dim);
+  }
+  .box{width:18px; height:18px; border:1.5px solid var(--border-strong); border-radius:4px; flex:none;}
+
+  /* ---------- Contributing ---------- */
+  .contrib-grid{display:grid; grid-template-columns:1.1fr 0.9fr; gap:56px;}
+
+  /* ---------- Footer ---------- */
+  footer{padding:64px 0 48px;}
+  .footer-grid{display:flex; justify-content:space-between; align-items:flex-end; gap:32px; flex-wrap:wrap;}
+  .footer-brand p{margin:6px 0 0; font-size:14px; max-width:44ch;}
+  .footer-links{display:flex; gap:16px; align-items:center;}
+  .fine{margin-top:40px; padding-top:24px; border-top:1px solid var(--border); font-size:13px; color:var(--text-faint);}
+
+  /* ---------- Back to top ---------- */
+  #top-btn{
+    position:fixed; right:24px; bottom:24px; width:44px; height:44px; border-radius:50%;
+    background:var(--surface-2); border:1px solid var(--border-strong); color:var(--text);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease; z-index:40;
+  }
+  #top-btn.show{opacity:1; pointer-events:auto;}
+  #top-btn:hover{border-color:var(--cyan); color:var(--cyan);}
+
+  @media (max-width:860px){
+    .hero-grid, .why-grid, .telemetry-grid, .contrib-grid{grid-template-columns:1fr;}
+    .cat-grid{grid-template-columns:1fr;}
+    .req-list{grid-template-columns:1fr;}
+    .feature-row{grid-template-columns:1fr; gap:8px;}
+    nav.links{display:none;}
+    section{padding:64px 0;}
+    .hero{padding:48px 0 64px;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    .terminal .ln{animation:none; opacity:1; transform:none;}
+    .cursor{animation:none;}
+    html{scroll-behavior:auto;}
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a href="#top" class="brand"><span class="glyph">&gt;_</span> WAD</a>
+    <nav class="links">
+      <a href="#instalacion">Instalación</a>
+      <a href="#caracteristicas">Características</a>
+      <a href="#funcionamiento">Cómo funciona</a>
+      <a href="#software">Software</a>
+      <a href="#telemetria">Telemetría</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-outline" href="https://github.com/javizcape/.ps1" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="eyebrow-badges">
+          <span class="pill">MIT License</span>
+          <span class="pill">Windows x64</span>
+          <span class="pill">PowerShell 5.1+</span>
+        </div>
+        <h1>Windows App Deployer</h1>
+        <p class="lede">Un script de código abierto que instala, valida y audita el software esencial de un equipo Windows en un solo comando — sin clics, sin instaladores sueltos, sin sorpresas.</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary" onclick="copyCmd('cmd-hero')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copiar comando de instalación
+          </button>
+          <a class="btn btn-outline" href="#software">Ver software incluido</a>
+        </div>
+        <div class="hero-stats">
+          <div><strong>16</strong><span>aplicaciones automatizadas</span></div>
+          <div><strong>AMD64</strong><span>arquitectura validada</span></div>
+          <div><strong>JSON</strong><span>reporte de auditoría</span></div>
+        </div>
+      </div>
+
+      <div class="terminal">
+        <div class="bar">
+          <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+          <span class="title">Administrador: Windows PowerShell</span>
+        </div>
+        <div class="body" id="cmd-hero-view">
+          <div class="ln"><span class="p">PS C:\&gt;</span> irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex</div>
+          <div class="ln dim">&nbsp;</div>
+          <div class="ln ok">[OK] Arquitectura AMD64 verificada</div>
+          <div class="ln ok">[OK] Permisos de administrador confirmados</div>
+          <div class="ln go">[..] Instalando Google Chrome vía Winget</div>
+          <div class="ln go">[..] Extrayendo FlyPhotos desde GitHub API</div>
+          <div class="ln ok">[OK] Reporte_Despliegue.json generado <span class="cursor"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUE ES WAD -->
+  <section id="que-es">
+    <div class="wrap why-grid">
+      <div>
+        <h2>Un despliegue, no una lista de tareas</h2>
+        <p>WAD nació para técnicos, administradores de sistemas e integradores que necesitan dejar decenas de equipos listos para producción sin repetir la misma secuencia de clics una y otra vez. Todo el flujo corre en segundo plano: valida, instala, verifica y reporta.</p>
+      </div>
+      <div class="spec-list">
+        <div class="spec-row">
+          <span class="glyph">01</span>
+          <div><h3>Cero interacción</h3><p>Todo el flujo corre desapercibido, sin ventanas de instalación que interrumpan al técnico.</p></div>
+        </div>
+        <div class="spec-row">
+          <span class="glyph">02</span>
+          <div><h3>Auto-elevación UAC</h3><p>Detecta permisos insuficientes y se relanza como Administrador sin intervención manual.</p></div>
+        </div>
+        <div class="spec-row">
+          <span class="glyph">03</span>
+          <div><h3>Híbrido Winget + GitHub API</h3><p>Usa el repositorio oficial de Microsoft y recurre a releases de GitHub cuando no hay paquete.</p></div>
+        </div>
+        <div class="spec-row">
+          <span class="glyph">04</span>
+          <div><h3>Telemetría real</h3><p>CPU, RAM, disco y temperatura vía WMI/CIM entregados en un reporte JSON al finalizar.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALACION -->
+  <section id="instalacion">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Ejecución rápida</h2>
+        <p>Abre PowerShell como Administrador, pega el comando y presiona Enter. WAD se encarga del resto.</p>
+      </div>
+
+      <div class="code-block">
+        <div class="head">
+          <span>Windows 10 / 11 (x64)</span>
+          <button class="copy-btn" id="btn-cmd-hero" onclick="copyCmd('cmd-hero')">Copiar</button>
+        </div>
+        <pre id="cmd-hero">irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex</pre>
+      </div>
+
+      <div class="code-block">
+        <div class="head">
+          <span>Alternativa si tu red o ISP bloquea el comando anterior</span>
+          <button class="copy-btn" id="btn-cmd-alt" onclick="copyCmd('cmd-alt')">Copiar</button>
+        </div>
+        <pre id="cmd-alt">iex (curl.exe -s https://javizcape.github.io/.ps1/install-apps.ps1 | Out-String)</pre>
+      </div>
+
+      <p class="note">Ejecuta PowerShell directamente como Administrador para evitar el paso extra de re-elevación.</p>
+
+      <h3 style="margin-top:48px;">Requisitos</h3>
+      <ul class="req-list">
+        <li>Windows 10 u 11, arquitectura x64 (AMD64)</li>
+        <li>PowerShell 5.1 o superior</li>
+        <li>Conexión a internet activa</li>
+        <li>Winget instalado (incluido en builds modernas)</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- CARACTERISTICAS -->
+  <section id="caracteristicas">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Características principales</h2>
+        <p>Cada decisión del script está pensada para dejar un equipo auditable, no solo instalado.</p>
+      </div>
+      <div class="feature-list">
+        <div class="feature-row">
+          <div><span class="tag">Seguridad</span></div>
+          <div>
+            <h3>Auto-elevación de privilegios (UAC)</h3>
+            <p>Detecta si el usuario estándar requiere permisos de administrador y re-invoca la sesión sin interrumpir el flujo.</p>
+          </div>
+        </div>
+        <div class="feature-row">
+          <div><span class="tag">Compatibilidad</span></div>
+          <div>
+            <h3>Filtro estricto de arquitectura</h3>
+            <p>Validación en tiempo real que garantiza ejecución exclusiva en entornos de 64 bits (AMD64).</p>
+          </div>
+        </div>
+        <div class="feature-row">
+          <div><span class="tag">Instalación</span></div>
+          <div>
+            <h3>Despliegue híbrido silencioso</h3>
+            <p>Prioriza instalación nativa vía Winget; recurre a extracción por GitHub API para apps sin instalador oficial empaquetado (ej. FlyPhotos, AB Download Manager).</p>
+          </div>
+        </div>
+        <div class="feature-row">
+          <div><span class="tag">Confiabilidad</span></div>
+          <div>
+            <h3>Gestión de errores integrada</h3>
+            <p>Captura códigos de salida de Windows (0, 3010, etc.) para validar cada instalación antes de continuar.</p>
+          </div>
+        </div>
+        <div class="feature-row">
+          <div><span class="tag">Auditoría</span></div>
+          <div>
+            <h3>Reporte de auditoría</h3>
+            <p>Genera un JSON con hardware, rendimiento y estado final de cada aplicación instalada.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COMO FUNCIONA -->
+  <section id="funcionamiento">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Cómo funciona</h2>
+        <p>El mismo recorrido que hace el script, de principio a fin.</p>
+      </div>
+      <div class="flow">
+        <div class="flow-step">
+          <span class="num">1</span>
+          <h3>Verifica la arquitectura</h3>
+          <p>Si el equipo no es AMD64, el script se detiene de inmediato.</p>
+        </div>
+        <div class="flow-step">
+          <span class="num">2</span>
+          <h3>Confirma privilegios de administrador</h3>
+          <p>Si faltan, se re-invoca a sí mismo solicitando elevación UAC.</p>
+        </div>
+        <div class="flow-step">
+          <span class="num">3</span>
+          <h3>Recorre el catálogo de aplicaciones</h3>
+          <p>Intenta primero la instalación nativa vía Winget.</p>
+        </div>
+        <div class="flow-step">
+          <span class="num">4</span>
+          <h3>Cae a GitHub API si no hay paquete</h3>
+          <p>Descarga y extrae el release oficial cuando la app no está en Winget.</p>
+        </div>
+        <div class="flow-step">
+          <span class="num">5</span>
+          <h3>Valida el código de salida</h3>
+          <p>Registra éxito o fallo por aplicación antes de continuar con la siguiente.</p>
+        </div>
+        <div class="flow-step">
+          <span class="num">6</span>
+          <h3>Ejecuta el diagnóstico de hardware</h3>
+          <p>Consulta CPU, RAM, disco y temperatura vía WMI/CIM.</p>
+        </div>
+        <div class="flow-step">
+          <span class="num">7</span>
+          <h3>Genera Reporte_Despliegue.json</h3>
+          <p>Guarda el resultado completo en el Escritorio, listo para auditoría.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SOFTWARE -->
+  <section id="software">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Software incluido</h2>
+        <p>Siempre se descarga la última versión estable de cada aplicación.</p>
+      </div>
+      <div class="cat-grid">
+        <div class="cat">
+          <h3>🧩 Requisitos de sistema</h3>
+          <table>
+            <tr><td>Visual C++ Redistributable 2015+</td><td>Runtime requerido por la mayoría de software Win32 moderno</td></tr>
+            <tr><td>.NET Framework</td><td>Activación vía DISM sobre componentes nativos de Windows</td></tr>
+            <tr><td>Java JRE x64</td><td>Entorno de ejecución Java de 64 bits</td></tr>
+          </table>
+        </div>
+        <div class="cat">
+          <h3>🧰 Herramientas de sistema</h3>
+          <table>
+            <tr><td>7-Zip</td><td>Compresor/descompresor universal</td></tr>
+            <tr><td>WinRAR x64</td><td>Gestor de archivos comprimidos</td></tr>
+            <tr><td>Bulk Crap Uninstaller</td><td>Desinstalación masiva y limpieza de residuos</td></tr>
+          </table>
+        </div>
+        <div class="cat">
+          <h3>🎬 Ofimática y multimedia</h3>
+          <table>
+            <tr><td>SumatraPDF</td><td>Lector de PDF ligero y rápido</td></tr>
+            <tr><td>VLC Media Player</td><td>Reproductor multimedia universal</td></tr>
+            <tr><td>FlyPhotos</td><td>Visor de imágenes de alto rendimiento</td></tr>
+          </table>
+        </div>
+        <div class="cat">
+          <h3>🌐 Navegadores web</h3>
+          <table>
+            <tr><td>Google Chrome</td><td>Navegador de propósito general</td></tr>
+            <tr><td>Mozilla Firefox</td><td>Navegador orientado a privacidad y extensiones</td></tr>
+            <tr><td>Mullvad Browser</td><td>Navegador enfocado en anonimato</td></tr>
+            <tr><td>Microsoft Edge</td><td>Navegador nativo de Windows</td></tr>
+          </table>
+        </div>
+        <div class="cat" style="grid-column:1 / -1;">
+          <h3>🔌 Utilidades de red</h3>
+          <table>
+            <tr><td>AB Download Manager</td><td>Gestor de descargas con soporte multi-hilo</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TELEMETRIA -->
+  <section id="telemetria">
+    <div class="wrap telemetry-grid">
+      <div>
+        <h2>Reporte de telemetría</h2>
+        <p>Al finalizar, WAD genera <code>Reporte_Despliegue.json</code> en el Escritorio con datos listos para auditar el equipo.</p>
+        <div class="readout" style="margin-top:32px;">
+          <div><div class="val">42%</div><div class="lbl">uso de RAM</div></div>
+          <div><div class="val">61%</div><div class="lbl">uso de disco C:</div></div>
+          <div><div class="val">48.5°</div><div class="lbl">temperatura CPU</div></div>
+        </div>
+        <ul class="telemetry-list">
+          <li><strong>Hardware —</strong> fabricante, modelo, procesador y arquitectura</li>
+          <li><strong>Rendimiento —</strong> capacidad total y % de uso de RAM y disco</li>
+          <li><strong>Diagnóstico térmico —</strong> temperatura de CPU vía sensores WMI/CIM</li>
+          <li><strong>Auditoría —</strong> tiempo y estado (éxito/fallo) por aplicación</li>
+        </ul>
+      </div>
+      <pre class="json">{
+  <span class="k">"hardware"</span>: {
+    <span class="k">"fabricante"</span>: <span class="s">"Dell Inc."</span>,
+    <span class="k">"modelo"</span>: <span class="s">"OptiPlex 7090"</span>,
+    <span class="k">"procesador"</span>: <span class="s">"Intel Core i5-11500"</span>,
+    <span class="k">"arquitectura"</span>: <span class="s">"x64"</span>
+  },
+  <span class="k">"rendimiento"</span>: {
+    <span class="k">"ram_total_gb"</span>: <span class="n">16</span>,
+    <span class="k">"ram_uso_porcentaje"</span>: <span class="n">42</span>,
+    <span class="k">"disco_c_total_gb"</span>: <span class="n">476</span>,
+    <span class="k">"disco_c_uso_porcentaje"</span>: <span class="n">61</span>
+  },
+  <span class="k">"diagnostico_termico"</span>: {
+    <span class="k">"cpu_temp_celsius"</span>: <span class="n">48.5</span>,
+    <span class="k">"fuente"</span>: <span class="s">"WMI/CIM"</span>
+  },
+  <span class="k">"auditoria_instalacion"</span>: [
+    { <span class="k">"app"</span>: <span class="s">"Google Chrome"</span>, <span class="k">"estado"</span>: <span class="s">"Éxito"</span>, <span class="k">"tiempo_segundos"</span>: <span class="n">14.2</span> },
+    { <span class="k">"app"</span>: <span class="s">"VLC Media Player"</span>, <span class="k">"estado"</span>: <span class="s">"Éxito"</span>, <span class="k">"tiempo_segundos"</span>: <span class="n">9.8</span> },
+    { <span class="k">"app"</span>: <span class="s">"FlyPhotos"</span>, <span class="k">"estado"</span>: <span class="s">"Fallo"</span>, <span class="k">"tiempo_segundos"</span>: <span class="n">3.1</span> }
+  ]
+}</pre>
+    </div>
+  </section>
+
+  <!-- PERSONALIZACION -->
+  <section id="personalizacion">
+    <div class="wrap">
+      <h2>Personalización</h2>
+      <p>¿Necesitas otro catálogo para tus propios despliegues? Edita la sección de configuración del script y ajusta:</p>
+      <ul class="plain-list">
+        <li>El listado de IDs de Winget a instalar</li>
+        <li>Las URLs de releases de GitHub para apps sin paquete oficial</li>
+        <li>El nombre y la ruta de salida del reporte JSON</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Preguntas frecuentes</h2>
+      </div>
+      <div>
+        <details class="faq" open>
+          <summary>¿Por qué el comando falla en mi red corporativa?</summary>
+          <p>Algunos proveedores o políticas de DNS bloquean <code>irm</code>. Usa el método alternativo con <code>curl.exe</code> de la sección de instalación.</p>
+        </details>
+        <details class="faq">
+          <summary>¿Funciona en Windows con arquitectura ARM64?</summary>
+          <p>No. WAD valida explícitamente AMD64 y detiene la ejecución en cualquier otra arquitectura.</p>
+        </details>
+        <details class="faq">
+          <summary>¿Puedo ejecutarlo sin ser administrador?</summary>
+          <p>Sí. El script detecta la falta de privilegios y se re-invoca a sí mismo solicitando elevación UAC.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ROADMAP -->
+  <section id="roadmap">
+    <div class="wrap">
+      <h2>Hoja de ruta</h2>
+      <ul class="roadmap">
+        <li><span class="box"></span> Modo silencioso configurable por parámetros de línea de comandos</li>
+        <li><span class="box"></span> Catálogo de aplicaciones editable vía archivo config.json externo</li>
+        <li><span class="box"></span> Soporte para ARM64</li>
+        <li><span class="box"></span> Registro de logs en formato .log además del reporte JSON</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- CONTRIBUCIONES -->
+  <section id="contribuciones">
+    <div class="wrap contrib-grid">
+      <div>
+        <h2>Contribuciones</h2>
+        <p>Las contribuciones son bienvenidas. ¿Encontraste un error? Abre un <a href="https://github.com/javizcape/.ps1/issues" target="_blank" rel="noopener">issue</a> describiendo el problema y, si es posible, adjunta el <code>Reporte_Despliegue.json</code> generado.</p>
+      </div>
+      <div class="flow">
+        <div class="flow-step"><span class="num">1</span><p style="margin:0;">Haz un fork del repositorio</p></div>
+        <div class="flow-step"><span class="num">2</span><p style="margin:0;">Crea una rama <code>feature/nueva-funcion</code></p></div>
+        <div class="flow-step"><span class="num">3</span><p style="margin:0;">Confirma tus cambios con un commit descriptivo</p></div>
+        <div class="flow-step"><span class="num">4</span><p style="margin:0;">Sube la rama a tu fork</p></div>
+        <div class="flow-step"><span class="num">5</span><p style="margin:0;">Abre un Pull Request</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LICENCIA -->
+  <section id="licencia">
+    <div class="wrap">
+      <h2>Licencia</h2>
+      <p>Este proyecto es de código abierto y se distribuye bajo la licencia MIT. Eres libre de auditar el código fuente, modificarlo, redistribuirlo y adaptarlo a tus propios flujos de trabajo o necesidades de administración de sistemas.</p>
+      <a class="btn btn-ghost" href="LICENSE" target="_blank" rel="noopener">Ver LICENSE completo</a>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <h3 style="margin-bottom:4px;">Javizcape</h3>
+        <p>JAVIZCAPE Soluciones Tecnológicas — integración de infraestructura TI, AV, CCTV y redes en Melgar, Tolima, Colombia.</p>
+      </div>
+      <div class="footer-links">
+        <a class="btn btn-outline" href="https://github.com/javizcape" target="_blank" rel="noopener">GitHub</a>
+        <a class="btn btn-primary" href="https://github.com/javizcape/.ps1" target="_blank" rel="noopener">Dar una estrella</a>
+      </div>
+    </div>
+    <div class="fine">Licencia MIT. Windows App Deployer, 2026.</div>
+  </div>
+</footer>
+
+<button id="top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Volver arriba">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+</button>
+
+<script>
+  const commands = {
+    'cmd-hero': 'irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex',
+    'cmd-alt': 'iex (curl.exe -s https://javizcape.github.io/.ps1/install-apps.ps1 | Out-String)'
+  };
+
+  function copyCmd(id){
+    const text = commands[id];
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.getElementById('btn-' + id);
+      if(btn){
+        const original = btn.textContent;
+        btn.textContent = '¡Copiado!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 1800);
+      }
+    }).catch(() => {});
+  }
+
+  // Back to top visibility
+  const topBtn = document.getElementById('top-btn');
+  window.addEventListener('scroll', () => {
+    topBtn.classList.toggle('show', window.scrollY > 600);
+  });
+
+  // Active nav link on scroll
+  const sections = document.querySelectorAll('main section[id]');
+  const navLinks = document.querySelectorAll('nav.links a');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if(entry.isIntersecting){
+        navLinks.forEach(l => l.classList.remove('active'));
+        const active = document.querySelector('nav.links a[href="#' + entry.target.id + '"]');
+        if(active) active.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-45% 0px -50% 0px'});
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
