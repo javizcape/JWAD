@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Windows App Deployer (WAD) — Despliegue masivo para Windows x64</title>
+<title>JWAD — Windows App Deployer · Despliegue masivo para Windows x64</title>
 <meta name="description" content="Script de código abierto en PowerShell para instalar software esencial en Windows x64 de forma silenciosa, automatizada y auditable.">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -365,7 +365,7 @@
 
 <header class="nav">
   <div class="nav-inner">
-    <a href="#top" class="brand"><span class="glyph">&gt;_</span>WAD</a>
+    <a href="#top" class="brand"><span class="glyph">&gt;_</span>JWAD</a>
     <nav class="links">
       <a href="#instalacion">Instalación</a>
       <a href="#caracteristicas">Características</a>
@@ -375,7 +375,7 @@
       <a href="#faq">FAQ</a>
     </nav>
     <div class="nav-cta">
-      <a class="btn btn-outline" href="https://github.com/javizcape/.ps1" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-outline" href="https://github.com/javizcape/JWAD" target="_blank" rel="noopener">GitHub</a>
     </div>
   </div>
 </header>
@@ -415,7 +415,7 @@
             <span class="title">Administrador: Windows PowerShell</span>
           </div>
           <div class="body" id="cmd-hero-view">
-            <div class="ln"><span class="p">PS C:\&gt;</span> irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex</div>
+            <div class="ln"><span class="p">PS C:\&gt;</span> irm https://javizcape.github.io/JWAD/install-apps.ps1 | iex</div>
             <div class="ln dim">&nbsp;</div>
             <div class="ln ok">[OK] Arquitectura AMD64 verificada</div>
             <div class="ln ok">[OK] Permisos de administrador confirmados</div>
@@ -428,12 +428,12 @@
     </div>
   </section>
 
-  <!-- QUE ES WAD -->
+  <!-- QUE ES JWAD -->
   <section id="que-es">
     <div class="wrap why-grid">
       <div>
         <h2>Un despliegue, no una lista de tareas</h2>
-        <p>WAD nació para técnicos, administradores de sistemas e integradores que necesitan dejar decenas de equipos listos para producción sin repetir la misma secuencia de clics una y otra vez. Todo el flujo corre en segundo plano: valida, instala, verifica y reporta.</p>
+        <p>JWAD nació para técnicos, administradores de sistemas e integradores que necesitan dejar decenas de equipos listos para producción sin repetir la misma secuencia de clics una y otra vez. Todo el flujo corre en segundo plano: valida, instala, verifica y reporta.</p>
       </div>
       <div class="spec-list">
         <div class="spec-row">
@@ -461,7 +461,7 @@
     <div class="wrap">
       <div class="section-head">
         <h2>Ejecución rápida</h2>
-        <p>Abre PowerShell como Administrador, pega el comando y presiona Enter. WAD se encarga del resto.</p>
+        <p>Abre PowerShell como Administrador, pega el comando y presiona Enter. JWAD se encarga del resto.</p>
       </div>
 
       <div class="code-block">
@@ -469,7 +469,7 @@
           <span>Windows 10 / 11 (x64)</span>
           <button class="copy-btn" id="btn-cmd-hero" onclick="copyCmd('cmd-hero')">Copiar</button>
         </div>
-        <pre id="cmd-hero">irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex</pre>
+        <pre id="cmd-hero">irm https://javizcape.github.io/JWAD/install-apps.ps1 | iex</pre>
       </div>
 
       <div class="code-block">
@@ -477,13 +477,13 @@
           <span>Alternativa si tu red o ISP bloquea el comando anterior</span>
           <button class="copy-btn" id="btn-cmd-alt" onclick="copyCmd('cmd-alt')">Copiar</button>
         </div>
-        <pre id="cmd-alt">iex (curl.exe -s https://javizcape.github.io/.ps1/install-apps.ps1 | Out-String)</pre>
+        <pre id="cmd-alt">iex (curl.exe -s https://javizcape.github.io/JWAD/install-apps.ps1 | Out-String)</pre>
       </div>
 
       <div class="verify-box">
         <div class="vi">
           <span>Código fuente auditable</span>
-          <code><a href="https://github.com/javizcape/.ps1/blob/main/install-apps.ps1" target="_blank" rel="noopener">github.com/javizcape/.ps1/install-apps.ps1</a></code>
+          <code><a href="https://github.com/javizcape/JWAD/blob/main/install-apps.ps1" target="_blank" rel="noopener">github.com/javizcape/JWAD/install-apps.ps1</a></code>
         </div>
         <div class="vi">
           <span>Verificación (SHA-256 del release actual)</span>
@@ -658,7 +658,7 @@
     <div class="wrap telemetry-grid">
       <div>
         <h2>Reporte de telemetría</h2>
-        <p>Al finalizar, WAD genera <code>Reporte_Despliegue.json</code> en el Escritorio con datos listos para auditar el equipo.</p>
+        <p>Al finalizar, JWAD genera <code>Reporte_Despliegue.json</code> en el Escritorio con datos listos para auditar el equipo.</p>
         <div class="readout" style="margin-top:32px;">
           <div><div class="val">42%</div><div class="lbl">uso de RAM</div></div>
           <div><div class="val">61%</div><div class="lbl">uso de disco C:</div></div>
@@ -723,7 +723,7 @@
         </details>
         <details class="faq">
           <summary>¿Por qué uBlock Origin u otro bloqueador marca el comando como "ClickFix"?</summary>
-          <p>Es una detección heurística por patrón, no un análisis del script en sí: cualquier página que diga "abre PowerShell, pega esto y presiona Enter" activa la misma alerta, la use un sitio malicioso o un instalador legítimo como este. Verifica siempre el código fuente enlazado en la sección de instalación antes de ejecutar cualquier one-liner remoto, sea de WAD o de cualquier otro proyecto.</p>
+          <p>Es una detección heurística por patrón, no un análisis del script en sí: cualquier página que diga "abre PowerShell, pega esto y presiona Enter" activa la misma alerta, la use un sitio malicioso o un instalador legítimo como este. Verifica siempre el código fuente enlazado en la sección de instalación antes de ejecutar cualquier one-liner remoto, sea de JWAD o de cualquier otro proyecto.</p>
         </details>
         <details class="faq">
           <summary>¿Puedo copiar el comando si el navegador bloquea el acceso al portapapeles?</summary>
@@ -731,7 +731,7 @@
         </details>
         <details class="faq">
           <summary>¿Funciona en Windows con arquitectura ARM64?</summary>
-          <p>No. WAD valida explícitamente AMD64 y detiene la ejecución en cualquier otra arquitectura.</p>
+          <p>No. JWAD valida explícitamente AMD64 y detiene la ejecución en cualquier otra arquitectura.</p>
         </details>
         <details class="faq">
           <summary>¿Puedo ejecutarlo sin ser administrador?</summary>
@@ -759,7 +759,7 @@
     <div class="wrap contrib-grid">
       <div>
         <h2>Contribuciones</h2>
-        <p>Las contribuciones son bienvenidas. ¿Encontraste un error? Abre un <a href="https://github.com/javizcape/.ps1/issues" target="_blank" rel="noopener">issue</a> describiendo el problema y, si es posible, adjunta el <code>Reporte_Despliegue.json</code> generado.</p>
+        <p>Las contribuciones son bienvenidas. ¿Encontraste un error? Abre un <a href="https://github.com/javizcape/JWAD/issues" target="_blank" rel="noopener">issue</a> describiendo el problema y, si es posible, adjunta el <code>Reporte_Despliegue.json</code> generado.</p>
       </div>
       <div class="flow">
         <div class="flow-step"><span class="num">1</span><p style="margin:0;">Haz un fork del repositorio</p></div>
@@ -791,7 +791,7 @@
       </div>
       <div class="footer-links">
         <a class="btn btn-outline" href="https://github.com/javizcape" target="_blank" rel="noopener">GitHub</a>
-        <a class="btn btn-install" href="https://github.com/javizcape/.ps1" target="_blank" rel="noopener">Dar una estrella</a>
+        <a class="btn btn-install" href="https://github.com/javizcape/JWAD" target="_blank" rel="noopener">Dar una estrella</a>
       </div>
     </div>
     <div class="fine">Licencia MIT. Windows App Deployer, 2026.</div>
@@ -804,8 +804,8 @@
 
 <script>
   const commands = {
-    'cmd-hero': 'irm https://javizcape.github.io/.ps1/install-apps.ps1 | iex',
-    'cmd-alt': 'iex (curl.exe -s https://javizcape.github.io/.ps1/install-apps.ps1 | Out-String)'
+    'cmd-hero': 'irm https://javizcape.github.io/JWAD/install-apps.ps1 | iex',
+    'cmd-alt': 'iex (curl.exe -s https://javizcape.github.io/JWAD/install-apps.ps1 | Out-String)'
   };
 
   function fallbackCopy(text){
