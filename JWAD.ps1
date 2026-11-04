@@ -1,632 +1,1048 @@
-#====================================================================
-# SCRIPT DE IMPLEMENTACION MASIVA DE APLICACIONES (Windows x64)
-#====================================================================
-# Version: 2.2 (Corregida - Septiembre 2026)
-# Autor: Arquitectura de Sistemas y Gobernanza Autonoma - Gemini Notebook
-# Alojado en: https://javizcape.github.io/JWAD/JWAD.ps1
-# Ejecucion:  irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
-#====================================================================
+#requires -Version 5.1
+<#
+JWAD - Windows App Deployer
+Version: 3.0 (arquitectura de fallback Winget -> Scoop -> Direct)
+Compatibilidad objetivo: Windows 10/11 x64; Windows PowerShell 5.1 y PowerShell 7+
 
-$ErrorActionPreference = "Stop"
+IMPORTANTE:
+- Ejecutar preferentemente como archivo local, después de revisar su contenido.
+- No se cambian políticas de ejecución de forma persistente.
+- Scoop se instala por usuario. Si el proceso está elevado, el bootstrap de Scoop
+  requiere autorización explícita mediante JWAD_ALLOW_SCOOP_ADMIN=1.
+- El fallback directo solo funciona cuando la aplicación tiene una fuente, un
+  patrón de asset y argumentos silenciosos verificados/configurados.
+- Nunca se selecciona un EXE/MSI arbitrario por ser el primer archivo del release.
+#>
 
-# Este script esta disenado para ejecutarse UNICAMENTE via:
-#   irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
-# Nunca se ejecuta como archivo local, por lo que $PSCommandPath jamas
-# existe y no debe usarse. Si cambias de repositorio o de ruta, actualiza
-# esta URL antes de publicar.
-$ScriptRemoteUrl = "https://javizcape.github.io/JWAD/JWAD.ps1"
-
-$DesktopPath = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
-$ReportePath = Join-Path $DesktopPath "Reporte_Despliegue.json"
-$TiempoTotalSw = [System.Diagnostics.Stopwatch]::StartNew()
-
-#====================================================================
-# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
-# Banner de apertura en ASCII PURO (sin caracteres Unicode de bloque/
-# caja): la version anterior usaba glifos de bloque Unicode que, al viajar
-# por el pipeline "irm | iex" (descarga remota + interpretacion del
-# codigo), pueden llegar a decodificarse con la pagina de codigos
-# incorrecta (ANSI/CP1252 en vez de UTF-8) y mostrarse como texto
-# corrupto (mojibake). Usando solo caracteres ASCII (\ _ | / =) se
-# garantiza que el logo se vea igual de bien en cualquier consola,
-# igual que ya ocurre con la firma pequena del cierre.
-#====================================================================
-$JWADBannerGrande = @(
-    '     ___        ___    ____  ',
-    '    | \ \      / / \  |  _ \ ',
-    ' _  | |\ \ /\ / / _ \ | | | |',
-    '| |_| | \ V  V / ___ \| |_| |',
-    ' \___/   \_/\_/_/   \_\____/ '
+[CmdletBinding()]
+param(
+    [switch]$SkipTelemetry,
+    [ValidateRange(0, 10)][int]$GitHubMaxRetries = 3
 )
-$JWADGradiente = @('Cyan', 'Blue', 'White', 'Blue', 'Cyan')
 
-Write-Host ""
-Write-Host "  ============================================" -ForegroundColor Cyan
-for ($i = 0; $i -lt $JWADBannerGrande.Count; $i++) {
-    Write-Host "  $($JWADBannerGrande[$i])" -ForegroundColor $JWADGradiente[$i]
+Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
+# -----------------------------------------------------------------------------
+# CONFIGURACION GLOBAL
+# -----------------------------------------------------------------------------
+$script:JWADVersion = '3.0'
+$script:JWADStarted = [System.Diagnostics.Stopwatch]::StartNew()
+$script:JWADIsAdmin = $false
+$script:ScoopBootstrapAttempted = $false
+$script:ScoopBootstrapSucceeded = $false
+$script:ScoopCommand = $null
+$script:InstallResults = New-Object 'System.Collections.Generic.List[object]'
+$script:LogDirectory = Join-Path $env:LOCALAPPDATA 'JWAD\Logs'
+$script:TempDirectory = Join-Path $env:TEMP 'JWAD'
+
+$desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
+if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop)) {
+    $desktop = $env:USERPROFILE
 }
-Write-Host "         WINDOWS APP DEPLOYER - v2.2" -ForegroundColor DarkCyan
-Write-Host "  ============================================" -ForegroundColor Cyan
-Write-Host ""
+$script:ReportPath = Join-Path $desktop 'Reporte_Despliegue_JWAD.json'
+$script:LogPath = Join-Path $script:LogDirectory ('JWAD_{0}.log' -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
 
-# 1. VALIDACION PREVIA Y PRIVILEGIOS DE ADMINISTRADOR
-Write-Host "=========================================================" -ForegroundColor Cyan
-Write-Host " INICIANDO ANALISIS DE SISTEMA Y CONTROL DE PRIVILEGIOS" -ForegroundColor Cyan
-Write-Host "=========================================================" -ForegroundColor Cyan
-
-# Validar Arquitectura x64
-if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64" -and $env:PROCESSOR_ARCHITEW6432 -ne "AMD64") {
-    Write-Host "[ERROR FATAL] Este script solo es compatible con la arquitectura Windows x64 (AMD64)." -ForegroundColor Red
-    return
-}
-Write-Host "[OK] Arquitectura compatible verificada: x64" -ForegroundColor Green
-
-# Validar que la URL remota fue configurada (requisito para poder re-elevar)
-if (-not $ScriptRemoteUrl -or $ScriptRemoteUrl -like "*tuusuario*") {
-    Write-Host "[ERROR FATAL] ScriptRemoteUrl no esta configurada. Edita la variable al inicio del script con la URL publica real antes de publicarlo." -ForegroundColor Red
-    return
-}
-
-# Validar Privilegios de Administrador
-$IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $IsAdmin) {
-    Write-Warning "[ADVERTENCIA] El script no se esta ejecutando como Administrador."
-    Write-Host "[*] Intentando elevar privilegios (se abrira una nueva ventana elevada)..." -ForegroundColor Yellow
-    try {
-        # No hay archivo fisico en disco (ejecucion via irm | iex), asi que el
-        # proceso elevado vuelve a descargar y ejecutar el script desde la URL remota.
-        $Comando = "irm $ScriptRemoteUrl | iex"
-        Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$Comando`"" -Verb RunAs | Out-Null
-    } catch {
-        Write-Host "[ERROR FATAL] Se requieren privilegios de Administrador para realizar las instalaciones. $($_.Exception.Message)" -ForegroundColor Red
-    }
-    # Se usa 'return' (no 'exit') para no cerrar la ventana de PowerShell
-    # original del usuario; la instalacion real continua en la ventana elevada.
-    return
-}
-Write-Host "[OK] Privilegios de Administrador confirmados." -ForegroundColor Green
-
-# 2. DEFINICION DE FUNCIONES DE INSTALACION
-function Install-AppViaWinget {
-    param (
-        [string]$AppName,
-        [string]$WingetId,
-        [string]$Arguments = ""
-    )
-    $AppSw = [System.Diagnostics.Stopwatch]::StartNew()
-    Write-Host "`n[*] Verificando estado de $AppName ($WingetId)..." -ForegroundColor Blue
-    try {
-        $WingetCheck = Get-Command winget -ErrorAction SilentlyContinue
-        if (-not $WingetCheck) {
-            throw "Winget no esta disponible en este sistema o no se encuentra en el PATH."
-        }
-
-        # Paso 1: validar si la aplicacion ya esta instalada ANTES de descargar
-        # o instalar nada, para no gastar recursos de forma innecesaria.
-        $ListadoInstalados = & winget list --id "$WingetId" --exact --accept-source-agreements 2>$null | Out-String
-        $YaInstalado = $ListadoInstalados -match [regex]::Escape($WingetId)
-
-        if ($YaInstalado) {
-            # Paso 2: si ya esta instalado, se valida contra la fuente oficial
-            # (repositorio de winget) si existe una version mas nueva, en vez
-            # de asumir que "ya instalado" es un error.
-            Write-Host "[-] $AppName ya esta instalado. Verificando si existe una version mas reciente en la fuente oficial..." -ForegroundColor Gray
-            $WingetArgs = "upgrade --id `"$WingetId`" --silent --exact --accept-package-agreements --accept-source-agreements"
-        } else {
-            Write-Host "[-] $AppName no esta instalado. Se procedera con la descarga e instalacion silenciosa (sin interfaz)." -ForegroundColor Gray
-            $WingetArgs = "install --id `"$WingetId`" --silent --exact --accept-package-agreements --accept-source-agreements --architecture x64"
-        }
-        if ($Arguments) {
-            $WingetArgs += " --override `"$Arguments`""
-        }
-
-        $Process = Start-Process -FilePath "winget" -ArgumentList $WingetArgs -Wait -NoNewWindow -PassThru
-        $ExitCode = $Process.ExitCode
-        $AppSw.Stop()
-
-        # Codigos de retorno que representan EXITO (no un error real):
-        #   0            : Exito (instalado o actualizado)
-        #   3010         : Exito, requiere reinicio
-        #   -1978335186  : Ya estaba instalado exactamente en esa version
-        #   -1978335189  : APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
-        #                  (ya se encuentra en la ultima version disponible)
-        $CodigosExito = @(0, 3010, -1978335186, -1978335189)
-        if ($CodigosExito -contains $ExitCode) {
-            $Estado = "INSTALLED"
-            if ($ExitCode -eq -1978335186 -or $ExitCode -eq -1978335189) { $Estado = "YA_ACTUALIZADO" }
-            elseif ($ExitCode -eq 3010) { $Estado = "INSTALLED_REINICIO_PENDIENTE" }
-
-            Write-Host "[OK] ${AppName}: $Estado" -ForegroundColor Green
-            return [PSCustomObject]@{
-                app_name = $AppName
-                estado   = $Estado
-                version_instalada = "Ultima disponible"
-                tiempo_instalacion_segundos = [Math]::Round($AppSw.Elapsed.TotalSeconds, 2)
-                error_mensaje = $null
-            }
-        } else {
-            throw "Winget finalizo con Exit Code: $ExitCode"
-        }
-    } catch {
-        $AppSw.Stop()
-        Write-Host "[FALLO] Error al instalar ${AppName}: $_" -ForegroundColor Red
-        return [PSCustomObject]@{
-            app_name = $AppName
-            estado   = "FAILED"
-            version_instalada = "N/A"
-            tiempo_instalacion_segundos = [Math]::Round($AppSw.Elapsed.TotalSeconds, 2)
-            error_mensaje = $_.Exception.Message
-        }
+foreach ($directory in @($script:LogDirectory, $script:TempDirectory)) {
+    if (-not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
     }
 }
 
-function Install-AppViaDirectUrl {
-    param (
-        [string]$AppName,
-        [string]$Repo,
-        [string]$AssetFilter,
-        [string]$Arguments = ""
-    )
-    $AppSw = [System.Diagnostics.Stopwatch]::StartNew()
-    Write-Host "`n[*] Consultando ultima version de $AppName ($Repo) en GitHub (fuente oficial)..." -ForegroundColor Blue
+# Windows PowerShell 5.1 en .NET Framework antiguo puede requerir TLS 1.2 explícito.
+# PowerShell 7 conserva el protocolo seguro predeterminado del sistema.
+if ($PSVersionTable.PSVersion.Major -eq 5) {
     try {
-        $ApiUrl = "https://api.github.com/repos/$Repo/releases/latest"
-        # Forzar TLS 1.2 o superior
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        $Release = Invoke-RestMethod -Uri $ApiUrl -UseBasicParsing
-        $VersionRemota = $Release.tag_name -replace '^v', ''
-        Write-Host "[-] Version mas reciente publicada: $VersionRemota" -ForegroundColor Gray
+    }
+    catch {
+        # La conectividad HTTPS podrá fallar posteriormente y será capturada por el fallback.
+    }
+}
 
-        # Paso 1: validar si ya esta instalada la misma version (o una mas
-        # reciente) ANTES de descargar nada, para no gastar recursos de forma
-        # innecesaria. Se consulta el registro de Windows.
-        $RutasRegistro = @(
-            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
-            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
-        )
-        $Instalado = Get-ItemProperty -Path $RutasRegistro -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -like "*$AppName*" } |
-            Select-Object -First 1
+# -----------------------------------------------------------------------------
+# PRESENTACION Y LOG
+# -----------------------------------------------------------------------------
+function Write-JWADMessage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Message,
+        [ValidateSet('INFO', 'OK', 'WARN', 'ERROR', 'TITLE')][string]$Level = 'INFO'
+    )
 
-        if ($Instalado -and $Instalado.DisplayVersion) {
-            $VersionLocal = $Instalado.DisplayVersion
-            Write-Host "[-] $AppName ya esta instalado (version local: $VersionLocal)." -ForegroundColor Gray
-            $EsVersionVigente = $false
-            try {
-                $EsVersionVigente = [version]$VersionLocal -ge [version]$VersionRemota
-            } catch {
-                # Si el formato de version no se puede comparar como [version],
-                # se compara como texto plano.
-                $EsVersionVigente = ($VersionLocal -eq $VersionRemota)
+    $color = switch ($Level) {
+        'OK'    { 'Green' }
+        'WARN'  { 'Yellow' }
+        'ERROR' { 'Red' }
+        'TITLE' { 'Cyan' }
+        default { 'Gray' }
+    }
+    $line = '[{0}] {1}' -f $Level, $Message
+    Write-Host $line -ForegroundColor $color
+    try {
+        Add-Content -LiteralPath $script:LogPath -Value ('{0} {1}' -f (Get-Date -Format 'o'), $line) -Encoding UTF8
+    }
+    catch {
+        # Un fallo del log no debe detener las instalaciones.
+    }
+}
+
+function Show-JWADProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][ValidateRange(0, 1000)][int]$Current,
+        [Parameter(Mandatory = $true)][ValidateRange(1, 1000)][int]$Total,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    $barWidth = 28
+    $ratio = [Math]::Min(1.0, [double]$Current / [double]$Total)
+    $filled = [int][Math]::Round($barWidth * $ratio)
+    $empty = $barWidth - $filled
+    $elapsed = [Math]::Round($script:JWADStarted.Elapsed.TotalSeconds, 1)
+    Write-Host ''
+    Write-Host ('  [{0,2}/{1,2}] {2}' -f $Current, $Total, $Label) -ForegroundColor Cyan
+    Write-Host '  [' -NoNewline -ForegroundColor Blue
+    if ($filled -gt 0) { Write-Host ('#' * $filled) -NoNewline -ForegroundColor Green }
+    if ($empty -gt 0) { Write-Host ('.' * $empty) -NoNewline -ForegroundColor DarkBlue }
+    Write-Host ('] {0}s' -f $elapsed) -ForegroundColor White
+}
+
+function Test-JWADAdministrator {
+    [CmdletBinding()]
+    param()
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch {
+        return $false
+    }
+}
+
+function ConvertTo-JWADQuotedArgument {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Value)
+    # Start-Process acepta una cadena de argumentos. Se escapan comillas dobles
+    # para evitar romper el límite entre argumentos.
+    return '"' + $Value.Replace('"', '\"') + '"'
+}
+
+function Invoke-JWADProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ArgumentList,
+        [ValidateRange(1, 86400)][int]$TimeoutSeconds = 1800
+    )
+
+    $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $processInfo.FileName = $FilePath
+    $processInfo.Arguments = $ArgumentList
+    $processInfo.UseShellExecute = $false
+    $processInfo.CreateNoWindow = $true
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $processInfo
+    try {
+        if (-not $process.Start()) { throw ('No se pudo iniciar el proceso: {0}' -f $FilePath) }
+        # Leer stdout/stderr de forma asíncrona evita bloquear el proceso si llena los buffers.
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timeoutMilliseconds = [int][Math]::Min([int]::MaxValue, ($TimeoutSeconds * 1000))
+        if (-not $process.WaitForExit($timeoutMilliseconds)) {
+            try { $process.Kill() } catch { }
+            throw ('Tiempo máximo agotado ({0}s): {1}' -f $TimeoutSeconds, $FilePath)
+        }
+        $process.WaitForExit()
+        return [PSCustomObject]@{
+            ExitCode = [int]$process.ExitCode
+            Output   = [string]$stdoutTask.Result
+            Error    = [string]$stderrTask.Result
+        }
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function New-JWADAttempt {
+    [CmdletBinding()]
+    param(
+        [string]$Method,
+        [string]$Outcome,
+        [string]$Message,
+        [Nullable[int]]$ExitCode = $null
+    )
+    return [PSCustomObject]@{
+        metodo       = $Method
+        resultado    = $Outcome
+        codigo_salida = $ExitCode
+        detalle      = $Message
+        timestamp    = (Get-Date -Format 'o')
+    }
+}
+
+function New-JWADResult {
+    [CmdletBinding()]
+    param(
+        [string]$Name,
+        [string]$Status,
+        [string]$Method,
+        [string]$Version = 'N/A',
+        [double]$Seconds = 0,
+        [object[]]$Attempts = @(),
+        [string]$ErrorMessage = $null
+    )
+    return [PSCustomObject]@{
+        app_name                    = $Name
+        estado                      = $Status
+        metodo_instalacion          = $Method
+        version_instalada           = $Version
+        tiempo_instalacion_segundos = [Math]::Round($Seconds, 2)
+        intentos                    = @($Attempts)
+        error_mensaje               = $ErrorMessage
+    }
+}
+
+# -----------------------------------------------------------------------------
+# NIVEL 1: WINGET
+# -----------------------------------------------------------------------------
+function Invoke-JWADWingetInstall {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$WingetId,
+        [string]$CustomArguments = ''
+    )
+
+    $command = Get-Command -Name 'winget.exe' -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $command) {
+        $command = Get-Command -Name 'winget' -CommandType Application -ErrorAction SilentlyContinue
+    }
+    if (-not $command) {
+        throw 'Winget no está instalado o no está disponible en PATH.'
+    }
+
+    $wingetArguments = @(
+        'install', '--id', (ConvertTo-JWADQuotedArgument $WingetId),
+        '--exact', '--silent', '--accept-package-agreements',
+        '--accept-source-agreements', '--architecture', 'x64'
+    )
+    if (-not [string]::IsNullOrWhiteSpace($CustomArguments)) {
+        $wingetArguments += @('--custom', (ConvertTo-JWADQuotedArgument $CustomArguments))
+    }
+
+    $processResult = Invoke-JWADProcess -FilePath $command.Source -ArgumentList ($wingetArguments -join ' ')
+    if ($processResult.ExitCode -eq 0) {
+        return [PSCustomObject]@{ Success = $true; Status = 'INSTALLED'; ExitCode = 0; Detail = 'Winget terminó correctamente.' }
+    }
+    if ($processResult.ExitCode -in @(3010, -1978334965)) {
+        return [PSCustomObject]@{ Success = $true; Status = 'INSTALLED_REBOOT_REQUIRED'; ExitCode = $processResult.ExitCode; Detail = 'WinGet terminó correctamente; se requiere reinicio o el reinicio fue iniciado.' }
+    }
+    # Códigos oficiales WinGet: INSTALL_ALREADY_INSTALLED,
+    # PACKAGE_ALREADY_INSTALLED y INSTALL_DOWNGRADE (ya hay versión superior).
+    # No se activa Scoop/Direct para evitar instalar una segunda copia.
+    if ($processResult.ExitCode -in @(-1978334963, -1978335135, -1978334962)) {
+        return [PSCustomObject]@{ Success = $true; Status = 'INSTALLED_ALREADY_PRESENT'; ExitCode = $processResult.ExitCode; Detail = 'WinGet informa que ya hay una versión instalada o una versión superior.' }
+    }
+
+    $combinedOutput = ('{0}{1}{2}' -f [string]$processResult.Output, [Environment]::NewLine, [string]$processResult.Error).Trim()
+    if ($combinedOutput.Length -gt 2000) { $combinedOutput = $combinedOutput.Substring(0, 2000) }
+    $detail = ('Winget ExitCode={0}. {1}' -f $processResult.ExitCode, $combinedOutput).Trim()
+    if ([string]::IsNullOrWhiteSpace($detail)) {
+        $detail = 'Winget devolvió un código de salida distinto de cero.'
+    }
+    throw $detail
+}
+
+# -----------------------------------------------------------------------------
+# NIVEL 2: SCOOP (BOOTSTRAP BAJO DEMANDA)
+# -----------------------------------------------------------------------------
+function Get-JWADScoopCommand {
+    [CmdletBinding()]
+    param()
+    $cmd = Get-Command -Name 'scoop' -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd }
+    return $null
+}
+
+function Invoke-JWADScoopCommand {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $cmd = Get-JWADScoopCommand
+    if (-not $cmd) { throw 'El comando scoop no está disponible.' }
+
+    $source = $cmd.Path
+    if ([string]::IsNullOrWhiteSpace($source)) { $source = $cmd.Source }
+    if ([string]::IsNullOrWhiteSpace($source)) { $source = $cmd.Definition }
+    if ([string]::IsNullOrWhiteSpace($source)) { throw 'No se pudo resolver la ruta del ejecutable/script Scoop.' }
+
+    # Evita reutilizar el LASTEXITCODE de un proceso externo anterior.
+    $global:LASTEXITCODE = 0
+    $output = @(& $source @Arguments 2>&1 | Out-String)
+    $code = 0
+    if ($LASTEXITCODE -is [int]) { $code = [int]$LASTEXITCODE }
+    if ($code -ne 0) {
+        $text = ($output -join '').Trim()
+        throw ('Scoop ExitCode={0}. {1}' -f $code, $text)
+    }
+    return ($output -join '').Trim()
+}
+
+function Install-JWADScoopBootstrap {
+    [CmdletBinding()]
+    param()
+
+    if ($script:ScoopBootstrapAttempted) {
+        if ($script:ScoopBootstrapSucceeded) { return }
+        throw 'El bootstrap de Scoop ya se intentó y falló en esta ejecución.'
+    }
+    $script:ScoopBootstrapAttempted = $true
+
+    if ($null -ne (Get-JWADScoopCommand)) {
+        $script:ScoopCommand = Get-JWADScoopCommand
+        $script:ScoopBootstrapSucceeded = $true
+        return
+    }
+
+    $policy = Get-ExecutionPolicy
+    if ($policy.ToString() -in @('Restricted', 'AllSigned')) {
+        throw ('ExecutionPolicy efectiva={0}; no se intentará eludirla. Configure una política autorizada o use el fallback directo.' -f $policy)
+    }
+
+    if ($script:JWADIsAdmin -and $env:JWAD_ALLOW_SCOOP_ADMIN -ne '1') {
+        throw 'La consola está elevada. Scoop no se instalará como administrador sin autorización explícita. Defina JWAD_ALLOW_SCOOP_ADMIN=1 si acepta ese modo.'
+    }
+
+    $installerUrl = $env:JWAD_SCOOP_INSTALLER_URL
+    if ([string]::IsNullOrWhiteSpace($installerUrl)) { $installerUrl = 'https://get.scoop.sh' }
+    if (-not $installerUrl.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'JWAD_SCOOP_INSTALLER_URL debe utilizar HTTPS.'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:JWAD_SCOOP_REPO_URL)) {
+        $env:SCOOP_REPO = $env:JWAD_SCOOP_REPO_URL
+    }
+
+    $requestParams = @{ Uri = $installerUrl; TimeoutSec = 60; ErrorAction = 'Stop' }
+    if ($PSVersionTable.PSVersion.Major -eq 5) { $requestParams.UseBasicParsing = $true }
+    $installerResponse = Invoke-WebRequest @requestParams
+    $installerText = [string]$installerResponse.Content
+    if ([string]::IsNullOrWhiteSpace($installerText) -or $installerText.Length -lt 1000) {
+        throw 'La respuesta del instalador de Scoop está vacía o no parece un script válido.'
+    }
+
+    # El patrón & { script } refleja el procedimiento oficial de Scoop y permite
+    # pasar -RunAsAdmin solo cuando se autorizó expresamente.
+    $invocation = "& {`n$installerText`n}"
+    if ($script:JWADIsAdmin) { $invocation += ' -RunAsAdmin' }
+    Invoke-Expression $invocation | Out-Null
+
+    $script:ScoopCommand = Get-JWADScoopCommand
+    if (-not $script:ScoopCommand) {
+        throw 'El instalador de Scoop terminó, pero el comando scoop no quedó disponible.'
+    }
+    $script:ScoopBootstrapSucceeded = $true
+}
+
+function Invoke-JWADScoopInstall {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ScoopName,
+        [ValidateSet('main', 'extras')][string]$Bucket = 'main'
+    )
+
+    Install-JWADScoopBootstrap
+
+    $bucketList = Invoke-JWADScoopCommand -Arguments @('bucket', 'list')
+    $bucketExists = [regex]::IsMatch($bucketList, ('(?im)^\s*{0}\s+' -f [regex]::Escape($Bucket)))
+    if (-not $bucketExists) {
+        $bucketArgs = @('bucket', 'add', $Bucket)
+        $bucketUrl = ''
+        if ($Bucket -eq 'extras') { $bucketUrl = $env:JWAD_SCOOP_EXTRAS_URL }
+        if ($Bucket -eq 'main') { $bucketUrl = $env:JWAD_SCOOP_MAIN_URL }
+        if (-not [string]::IsNullOrWhiteSpace($bucketUrl)) {
+            if (-not $bucketUrl.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+                throw ('JWAD_SCOOP_{0}_URL debe utilizar HTTPS.' -f $Bucket.ToUpperInvariant())
             }
-            if ($EsVersionVigente) {
-                $AppSw.Stop()
-                Write-Host "[OK] $AppName ya se encuentra en la ultima version disponible. No se requiere descarga." -ForegroundColor Green
-                return [PSCustomObject]@{
-                    app_name = $AppName
-                    estado   = "YA_ACTUALIZADO"
-                    version_instalada = $VersionLocal
-                    tiempo_instalacion_segundos = [Math]::Round($AppSw.Elapsed.TotalSeconds, 2)
-                    error_mensaje = $null
+            $bucketArgs += $bucketUrl
+        }
+        [void](Invoke-JWADScoopCommand -Arguments $bucketArgs)
+    }
+
+    $package = if ($Bucket -eq 'main') { $ScoopName } else { 'extras/{0}' -f $ScoopName }
+    [void](Invoke-JWADScoopCommand -Arguments @('install', $package))
+    return [PSCustomObject]@{ Success = $true; Status = 'INSTALLED'; ExitCode = 0; Detail = ('Scoop instaló {0}.' -f $package) }
+}
+
+# -----------------------------------------------------------------------------
+# NIVEL 3: DESCARGA DIRECTA Y VERIFICACION
+# -----------------------------------------------------------------------------
+function Get-JWADHttpStatusCode {
+    [CmdletBinding()]
+    param([System.Exception]$Exception)
+    try {
+        if ($Exception.Response -and $Exception.Response.StatusCode) {
+            return [int]$Exception.Response.StatusCode
+        }
+    }
+    catch { }
+    return 0
+}
+
+function Get-JWADResponseHeader {
+    [CmdletBinding()]
+    param(
+        [System.Exception]$Exception,
+        [string]$Name
+    )
+    try {
+        if ($Exception.Response -and $Exception.Response.Headers) {
+            return [string]$Exception.Response.Headers[$Name]
+        }
+    }
+    catch { }
+    return ''
+}
+
+function Get-JWADGitHubRelease {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Repository,
+        [int]$MaxRetries = 3
+    )
+
+    if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
+        throw 'GitHubRepo debe tener formato propietario/repositorio.'
+    }
+
+    $apiBase = $env:JWAD_GITHUB_API_BASE
+    if ([string]::IsNullOrWhiteSpace($apiBase)) { $apiBase = 'https://api.github.com' }
+    $apiBase = $apiBase.TrimEnd('/')
+    if (-not $apiBase.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'JWAD_GITHUB_API_BASE debe utilizar HTTPS.'
+    }
+
+    $uri = '{0}/repos/{1}/releases/latest' -f $apiBase, $Repository
+    $headers = @{
+        Accept = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2026-03-10'
+        'User-Agent' = 'JWAD-Windows-App-Deployer/3.0'
+    }
+    $token = $env:JWAD_GITHUB_TOKEN
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = $env:GH_TOKEN }
+    if ([string]::IsNullOrWhiteSpace($token)) { $token = $env:GITHUB_TOKEN }
+    if (-not [string]::IsNullOrWhiteSpace($token)) { $headers.Authorization = 'Bearer ' + $token }
+
+    $attempt = 0
+    while ($attempt -le $MaxRetries) {
+        try {
+            $requestParams = @{ Uri = $uri; Headers = $headers; TimeoutSec = 45; ErrorAction = 'Stop' }
+            if ($PSVersionTable.PSVersion.Major -eq 5) { $requestParams.UseBasicParsing = $true }
+            $response = Invoke-WebRequest @requestParams
+            return ($response.Content | ConvertFrom-Json -ErrorAction Stop)
+        }
+        catch {
+            $status = Get-JWADHttpStatusCode -Exception $_.Exception
+            $remaining = Get-JWADResponseHeader -Exception $_.Exception -Name 'X-RateLimit-Remaining'
+            $retryAfter = Get-JWADResponseHeader -Exception $_.Exception -Name 'Retry-After'
+            $reset = Get-JWADResponseHeader -Exception $_.Exception -Name 'X-RateLimit-Reset'
+            $errorDetail = [string]$_.ErrorDetails.Message
+            $combinedError = ('{0} {1}' -f $_.Exception.Message, $errorDetail)
+            $isRateLimit = ($status -eq 429) -or ($status -eq 403 -and ($remaining -eq '0' -or $combinedError -match '(?i)rate limit|secondary rate limit|abuse detection'))
+
+            if (-not $isRateLimit -or $attempt -ge $MaxRetries) { throw }
+
+            $delay = 0
+            $parsedDelay = 0
+            if ([int]::TryParse($retryAfter, [ref]$parsedDelay)) {
+                $delay = $parsedDelay
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace($retryAfter)) {
+                $retryDate = [DateTimeOffset]::MinValue
+                if ([DateTimeOffset]::TryParse($retryAfter, [ref]$retryDate)) {
+                    $delay = [int][Math]::Max(1, [Math]::Ceiling(($retryDate - [DateTimeOffset]::UtcNow).TotalSeconds))
                 }
             }
-            Write-Host "[-] Hay una version mas reciente disponible en el repositorio oficial. Se procedera a actualizar." -ForegroundColor Gray
-        } else {
-            Write-Host "[-] $AppName no esta instalado. Se procedera con la descarga e instalacion silenciosa (sin interfaz)." -ForegroundColor Gray
-        }
-
-        # Filtrar assets compatibles con x64
-        $Asset = $Release.assets | Where-Object {
-            ($_.name -like "*$AssetFilter*" -or $_.name -like "*x64*" -or $_.name -like "*win64*" -or $_.name -like "*64*") -and
-            ($_.name -like "*.exe" -or $_.name -like "*.msi") -and
-            ($_.name -notlike "*arm*") -and
-            ($_.name -notlike "*mac*") -and
-            ($_.name -notlike "*linux*")
-        } | Select-Object -First 1
-
-        if (-not $Asset) {
-            # Busqueda de respaldo generica
-            $Asset = $Release.assets | Where-Object {
-                ($_.name -like "*.exe" -or $_.name -like "*.msi") -and
-                ($_.name -notlike "*arm*")
-            } | Select-Object -First 1
-        }
-
-        if (-not $Asset) {
-            throw "No se encontro ningun asset ejecutable x64 compatible."
-        }
-
-        $DownloadUrl = $Asset.browser_download_url
-        $FileName = $Asset.name
-        $TempPath = Join-Path $env:TEMP $FileName
-
-        Write-Host "[-] Descargando $FileName..." -ForegroundColor Gray
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing
-
-        Write-Host "[-] Instalando de forma silenciosa (sin interfaz ni asistente)..." -ForegroundColor Gray
-        $ExitCode = 0
-        if ($FileName -like "*.msi") {
-            # Instalador MSI: los unicos switches validos para instalacion
-            # silenciosa son /qn (o /quiet) y /norestart. Cualquier switch
-            # adicional propio de instaladores EXE (por ejemplo /S) produce el
-            # error 1639 (ERROR_INVALID_COMMAND_LINE), por lo que aqui NO se
-            # reenvia el parametro -Arguments recibido.
-            $Process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$TempPath`" /qn /norestart" -Wait -NoNewWindow -PassThru
-            $ExitCode = $Process.ExitCode
-        } else {
-            $Process = Start-Process -FilePath $TempPath -ArgumentList $Arguments -Wait -NoNewWindow -PassThru
-            $ExitCode = $Process.ExitCode
-        }
-
-        Remove-Item $TempPath -Force -ErrorAction SilentlyContinue
-        $AppSw.Stop()
-
-        if ($ExitCode -eq 0 -or $ExitCode -eq 3010) {
-            Write-Host "[OK] $AppName instalado correctamente desde GitHub." -ForegroundColor Green
-            return [PSCustomObject]@{
-                app_name = $AppName
-                estado   = "INSTALLED"
-                version_instalada = $VersionRemota
-                tiempo_instalacion_segundos = [Math]::Round($AppSw.Elapsed.TotalSeconds, 2)
-                error_mensaje = $null
+            if ($delay -eq 0 -and $remaining -eq '0' -and $reset -match '^\d+$') {
+                $resetTime = [DateTimeOffset]::FromUnixTimeSeconds([long]$reset)
+                $delay = [int][Math]::Max(1, [Math]::Ceiling(($resetTime - [DateTimeOffset]::UtcNow).TotalSeconds))
             }
-        } else {
-            throw "El instalador fallo con Exit Code: $ExitCode"
-        }
-    } catch {
-        $AppSw.Stop()
-        Write-Host "[FALLO] Error al instalar ${AppName}: $_" -ForegroundColor Red
-        return [PSCustomObject]@{
-            app_name = $AppName
-            estado   = "FAILED"
-            version_instalada = "N/A"
-            tiempo_instalacion_segundos = [Math]::Round($AppSw.Elapsed.TotalSeconds, 2)
-            error_mensaje = $_.Exception.Message
+            elseif ($delay -eq 0) {
+                # GitHub recomienda al menos 60 s ante rate limit secundario sin Retry-After.
+                $delay = 60 * ($attempt + 1)
+            }
+
+            $maxWait = 120
+            if ($env:JWAD_GITHUB_MAX_WAIT_SECONDS -match '^\d+$') {
+                $maxWait = [Math]::Max(0, [int]$env:JWAD_GITHUB_MAX_WAIT_SECONDS)
+            }
+            if ($delay -gt $maxWait) {
+                throw ('GitHub rate limit. La espera indicada ({0}s) supera el máximo configurado ({1}s).' -f $delay, $maxWait)
+            }
+            Start-Sleep -Seconds ([Math]::Max(1, $delay))
+            $attempt++
         }
     }
+    throw 'No fue posible consultar la versión más reciente en GitHub.'
 }
 
-#====================================================================
-# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
-# Barra de progreso ASCII simple y visual para seguir el avance global
-# del despliegue (complementos + 11 aplicaciones = 14 pasos).
-#
-# NOTAS DE AJUSTE:
-# - Se reemplazan los caracteres de bloque Unicode que se usaban antes
-#   por caracteres ASCII puros ('#', '.', '[', ']'), ya que al viajar
-#   por el pipeline remoto "irm | iex" podian decodificarse con la
-#   pagina de codigos incorrecta y mostrarse como texto corrupto.
-# - Se retira el porcentaje por aplicacion: como cada instalacion es
-#   una operacion atomica (via winget o msiexec en modo silencioso, sin
-#   progreso incremental real), mostrar un "%" por app era enganoso -
-#   por ejemplo, marcaba "100%" justo antes de iniciar la ultima
-#   instalacion, cuando en realidad esta ni siquiera habia comenzado.
-#   En su lugar se muestra el tiempo total transcurrido en segundos
-#   (dato real y siempre coherente, tomado del cronometro global).
-# - Paleta alineada con el resto del script (nada de magenta): azul
-#   claro/oscuro para la estructura, blanco para el dato, y verde para
-#   la porcion ya recorrida (mismo verde que usan los mensajes [OK]).
-#====================================================================
-function Show-JWADProgressBar {
-    param (
-        [int]$Current,
-        [int]$Total,
-        [string]$Label
+function Get-JWADDirectDownloadUrl {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$OriginalUrl)
+
+    $mirror = $env:JWAD_GITHUB_DOWNLOAD_BASE
+    if ($OriginalUrl -notmatch '^https://github\.com/') { return $OriginalUrl }
+    if (-not [string]::IsNullOrWhiteSpace($mirror)) {
+        if (-not $mirror.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'JWAD_GITHUB_DOWNLOAD_BASE debe utilizar HTTPS.'
+        }
+        $relative = $OriginalUrl -replace '^https://github\.com/', ''
+        return ($mirror.TrimEnd('/') + '/' + $relative)
+    }
+    return $OriginalUrl
+}
+
+function Invoke-JWADDirectInstall {
+    [CmdletBinding()]
+    param(
+        [string]$AppName,
+        [string]$Repository,
+        [string]$AssetRegex,
+        [string]$Arguments = '',
+        [string]$ExpectedSHA256 = '',
+        [string]$DirectUrl = '',
+        [string]$DirectFileName = '',
+        [string]$ExpectedSigner = ''
     )
-    $Ancho = 28
-    $Fraccion = if ($Total -gt 0) { $Current / $Total } else { 0 }
-    $Relleno = [Math]::Round($Ancho * $Fraccion)
-    if ($Relleno -gt $Ancho) { $Relleno = $Ancho }
-    $Vacio = $Ancho - $Relleno
-    $SegundosTranscurridos = [Math]::Round($TiempoTotalSw.Elapsed.TotalSeconds, 1)
 
-    Write-Host ""
-    Write-Host ("  [{0,2}/{1,2}] {2}" -f $Current, $Total, $Label) -ForegroundColor Cyan
-    Write-Host "  [" -ForegroundColor Blue -NoNewline
-    if ($Relleno -gt 0) { Write-Host ('#' * $Relleno) -ForegroundColor Green -NoNewline }
-    if ($Vacio -gt 0) { Write-Host ('.' * $Vacio) -ForegroundColor DarkBlue -NoNewline }
-    Write-Host "] " -ForegroundColor Blue -NoNewline
-    Write-Host ("{0}s transcurridos" -f $SegundosTranscurridos) -ForegroundColor White
-}
+    $version = 'N/A'
+    $downloadUrl = ''
+    $assetName = ''
+    $expectedHash = $ExpectedSHA256
 
-$JWADPasoActual = 0
-$JWADPasosTotal = 14
-
-# 3. VERIFICACION E INSTALACION DE COMPLEMENTOS PREVIOS (REQUISITOS)
-Write-Host "`n=========================================================" -ForegroundColor Cyan
-Write-Host " INSTALANDO COMPLEMENTOS DE SISTEMA REQUERIDOS" -ForegroundColor Cyan
-Write-Host "=========================================================" -ForegroundColor Cyan
-
-# Visual C++ Redistributable x64
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Visual C++ Redistributable x64"
-$VCRedistResult = Install-AppViaWinget -AppName "Visual C++ Redistributable x64" -WingetId "Microsoft.VCRedist.2015+.x64"
-
-# .NET Framework (validacion, no reinstalacion forzada)
-# NOTA TECNICA: en Windows 10/11 el .NET Framework 4.x viene incluido de
-# fabrica y se actualiza via Windows Update, no mediante DISM. El nombre de
-# caracteristica "NetFX4" usado en la version anterior de este script NO
-# existe como feature de DISM, lo cual provocaba el error 0x800f0813. Aqui
-# se valida su presencia y version consultando el registro oficial de .NET.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label ".NET Framework (validacion)"
-$NetSw = [System.Diagnostics.Stopwatch]::StartNew()
-Write-Host "[*] Verificando presencia de .NET Framework 4.x..." -ForegroundColor Blue
-try {
-    $NetRelease = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction Stop).Release
-    $NetSw.Stop()
-    if ($NetRelease -ge 528040) {
-        Write-Host "[OK] .NET Framework 4.8 (o superior) ya esta instalado (Release: $NetRelease)." -ForegroundColor Green
-        $NetResult = [PSCustomObject]@{
-            app_name = ".NET Framework"
-            estado   = "YA_ACTUALIZADO"
-            version_instalada = "Release $NetRelease"
-            tiempo_instalacion_segundos = [Math]::Round($NetSw.Elapsed.TotalSeconds, 2)
-            error_mensaje = $null
+    if (-not [string]::IsNullOrWhiteSpace($Repository)) {
+        if ([string]::IsNullOrWhiteSpace($AssetRegex)) {
+            throw 'GitHubRepo está configurado, pero RegexAsset no. No se seleccionará un asset genérico.'
         }
-    } else {
-        Write-Host "[AVISO] Version de .NET Framework antigua detectada (Release: $NetRelease). Se recomienda actualizar via Windows Update." -ForegroundColor Yellow
-        $NetResult = [PSCustomObject]@{
-            app_name = ".NET Framework"
-            estado   = "DESACTUALIZADO"
-            version_instalada = "Release $NetRelease"
-            tiempo_instalacion_segundos = [Math]::Round($NetSw.Elapsed.TotalSeconds, 2)
-            error_mensaje = $null
+        $release = Get-JWADGitHubRelease -Repository $Repository -MaxRetries $GitHubMaxRetries
+        $version = [string]$release.tag_name
+        $matches = @($release.assets | Where-Object { $_.name -match $AssetRegex })
+        if ($matches.Count -ne 1) {
+            throw ('RegexAsset produjo {0} coincidencias; se requiere exactamente una.' -f $matches.Count)
+        }
+        $asset = $matches[0]
+        $assetName = [string]$asset.name
+        $downloadUrl = [string]$asset.browser_download_url
+        if ([string]::IsNullOrWhiteSpace($expectedHash) -and [string]$asset.digest -match '^sha256:([A-Fa-f0-9]{64})$') {
+            $expectedHash = $Matches[1]
         }
     }
-} catch {
-    $NetSw.Stop()
-    Write-Host "[FALLO] No se pudo verificar .NET Framework: $_" -ForegroundColor Red
-    $NetResult = [PSCustomObject]@{
-        app_name = ".NET Framework"
-        estado   = "FAILED"
-        version_instalada = "N/A"
-        tiempo_instalacion_segundos = [Math]::Round($NetSw.Elapsed.TotalSeconds, 2)
-        error_mensaje = $_.Exception.Message
+    elseif (-not [string]::IsNullOrWhiteSpace($DirectUrl)) {
+        $downloadUrl = $DirectUrl
+        $assetName = $DirectFileName
+        if ([string]::IsNullOrWhiteSpace($assetName)) {
+            $assetName = [IO.Path]::GetFileName(([Uri]$DirectUrl).AbsolutePath)
+        }
+    }
+    else {
+        throw 'No existe GitHubRepo ni DirectUrl configurado para el fallback directo.'
+    }
+
+    if (-not $downloadUrl.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'La URL de descarga no utiliza HTTPS.'
+    }
+
+    $downloadUrl = Get-JWADDirectDownloadUrl -OriginalUrl $downloadUrl
+    $extension = [IO.Path]::GetExtension($assetName).ToLowerInvariant()
+    if ($extension -notin @('.exe', '.msi')) {
+        throw ('Tipo de asset no admitido para instalación directa: {0}. Solo EXE/MSI explícitos.' -f $extension)
+    }
+
+    $downloadPath = Join-Path $script:TempDirectory ([Guid]::NewGuid().ToString('N') + $extension)
+    try {
+        $downloadParams = @{ Uri = $downloadUrl; OutFile = $downloadPath; TimeoutSec = 180; ErrorAction = 'Stop' }
+        if ($PSVersionTable.PSVersion.Major -eq 5) { $downloadParams.UseBasicParsing = $true }
+        Invoke-WebRequest @downloadParams
+
+        if (-not (Test-Path -LiteralPath $downloadPath) -or (Get-Item -LiteralPath $downloadPath).Length -le 0) {
+            throw 'La descarga no produjo un archivo válido.'
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($expectedHash)) {
+            if ($expectedHash -notmatch '^[A-Fa-f0-9]{64}$') { throw 'ExpectedSHA256 no tiene formato SHA-256 válido.' }
+            $actualHash = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash
+            if ($actualHash -ne $expectedHash.ToUpperInvariant()) {
+                throw 'El SHA-256 descargado no coincide con el digest/hash esperado.'
+            }
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($ExpectedSigner)) {
+            $signature = Get-AuthenticodeSignature -FilePath $downloadPath
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike ('*{0}*' -f $ExpectedSigner)) {
+                throw 'La firma Authenticode no es válida o el firmante no coincide con ExpectedSigner.'
+            }
+        }
+        else {
+            throw 'SIN INFORMACIÓN: el asset no publica digest SHA-256 y no hay ExpectedSHA256/ExpectedSigner configurado. Descarga rechazada.'
+        }
+
+        if ($extension -eq '.msi') {
+            $msiArgs = '/i {0} /qn /norestart' -f (ConvertTo-JWADQuotedArgument $downloadPath)
+            $proc = Invoke-JWADProcess -FilePath (Join-Path $env:SystemRoot 'System32\msiexec.exe') -ArgumentList $msiArgs
+        }
+        else {
+            if ([string]::IsNullOrWhiteSpace($Arguments)) {
+                throw 'SIN INFORMACIÓN: no se han configurado argumentos silenciosos verificados para este EXE.'
+            }
+            $proc = Invoke-JWADProcess -FilePath $downloadPath -ArgumentList $Arguments
+        }
+
+        if ($proc.ExitCode -eq 0) {
+            return [PSCustomObject]@{ Success = $true; Status = 'INSTALLED'; ExitCode = 0; Version = $version; Detail = ('Instalación directa verificada: {0}' -f $assetName) }
+        }
+        if ($proc.ExitCode -in @(3010, 1641)) {
+            return [PSCustomObject]@{ Success = $true; Status = 'INSTALLED_REBOOT_REQUIRED'; ExitCode = $proc.ExitCode; Version = $version; Detail = ('Instalación directa verificada; requiere reinicio: {0}' -f $assetName) }
+        }
+        $installerOutput = ('{0}{1}{2}' -f [string]$proc.Output, [Environment]::NewLine, [string]$proc.Error).Trim()
+        if ($installerOutput.Length -gt 2000) { $installerOutput = $installerOutput.Substring(0, 2000) }
+        throw ('El instalador directo terminó con ExitCode={0}. {1}' -f $proc.ExitCode, $installerOutput)
+    }
+    finally {
+        if (Test-Path -LiteralPath $downloadPath) {
+            Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
-# Java Runtime Environment (JRE) x64
-# NOTA: Oracle discontinuo la distribucion publica de "Oracle.JRE" en el
-# repositorio de winget (por eso fallaba con "paquete no encontrado"). El
-# reemplazo libre y con soporte activo es Eclipse Temurin JRE (OpenJDK).
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Java Runtime Environment (JRE) x64"
-$JavaResult = Install-AppViaWinget -AppName "Java Runtime Environment" -WingetId "EclipseAdoptium.Temurin.21.JRE"
+# -----------------------------------------------------------------------------
+# WRAPPER UNIVERSAL: WINGET -> SCOOP -> DIRECT
+# -----------------------------------------------------------------------------
+function Install-UniversalApp {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [string]$WingetId = '',
+        [string]$WingetCustomArgs = '',
+        [string]$ScoopName = '',
+        [ValidateSet('main', 'extras')][string]$ScoopBucket = 'main',
+        [string]$GitHubRepo = '',
+        [string]$RegexAsset = '',
+        [string]$DirectArguments = '',
+        [string]$ExpectedSHA256 = '',
+        [string]$DirectUrl = '',
+        [string]$DirectFileName = '',
+        [string]$ExpectedSigner = ''
+    )
 
-# 4. INSTALACION DE LAS 11 APLICACIONES PRINCIPALES
-Write-Host "`n=========================================================" -ForegroundColor Cyan
-Write-Host " INICIANDO IMPLEMENTACION DE LAS 11 APLICACIONES PRINCIPALES" -ForegroundColor Cyan
-Write-Host "=========================================================" -ForegroundColor Cyan
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $attempts = New-Object 'System.Collections.Generic.List[object]'
+    $finalStatus = 'FAILED'
+    $finalMethod = 'NONE'
+    $finalVersion = 'N/A'
+    $finalError = $null
 
-$ResultadosList = [System.Collections.Generic.List[PSCustomObject]]::new()
+    # Nivel 1: Winget
+    if (-not [string]::IsNullOrWhiteSpace($WingetId)) {
+        try {
+            $r = Invoke-JWADWingetInstall -WingetId $WingetId -CustomArguments $WingetCustomArgs
+            $attempts.Add((New-JWADAttempt -Method 'Winget' -Outcome 'SUCCESS' -Message $r.Detail -ExitCode $r.ExitCode))
+            $finalStatus = $r.Status
+            $finalMethod = 'Winget'
+            $finalError = $null
+        }
+        catch {
+            $message = $_.Exception.Message
+            $attempts.Add((New-JWADAttempt -Method 'Winget' -Outcome 'FAILED' -Message $message))
+            $finalError = $message
+        }
+    }
+    else {
+        $attempts.Add((New-JWADAttempt -Method 'Winget' -Outcome 'NOT_CONFIGURED' -Message 'SIN INFORMACIÓN: WingetId no está configurado.'))
+    }
 
-# Agregar complementos de sistema a la lista de reportes
-$ResultadosList.Add($VCRedistResult)
-$ResultadosList.Add($NetResult)
-$ResultadosList.Add($JavaResult)
+    # Nivel 2: Scoop solo si hay un manifiesto identificado.
+    if ($finalMethod -eq 'NONE') {
+        if (-not [string]::IsNullOrWhiteSpace($ScoopName)) {
+            try {
+                $r = Invoke-JWADScoopInstall -ScoopName $ScoopName -Bucket $ScoopBucket
+                $attempts.Add((New-JWADAttempt -Method 'Scoop' -Outcome 'SUCCESS' -Message $r.Detail -ExitCode $r.ExitCode))
+                $finalStatus = $r.Status
+                $finalMethod = 'Scoop'
+                $finalError = $null
+            }
+            catch {
+                $message = $_.Exception.Message
+                $attempts.Add((New-JWADAttempt -Method 'Scoop' -Outcome 'FAILED' -Message $message))
+                $finalError = $message
+            }
+        }
+        else {
+            $attempts.Add((New-JWADAttempt -Method 'Scoop' -Outcome 'NOT_CONFIGURED' -Message 'SIN INFORMACIÓN: no se ha verificado un manifiesto Scoop para esta aplicación.'))
+        }
+    }
 
-# App 1: 7-Zip (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "7-Zip"
-$ResultadosList.Add((Install-AppViaWinget -AppName "7-Zip" -WingetId "7zip.7zip"))
+    # Nivel 3: fuente directa, si se ha definido una ruta de confianza.
+    if ($finalMethod -eq 'NONE') {
+        if (-not [string]::IsNullOrWhiteSpace($GitHubRepo) -or -not [string]::IsNullOrWhiteSpace($DirectUrl)) {
+            try {
+                $r = Invoke-JWADDirectInstall -AppName $AppName -Repository $GitHubRepo -AssetRegex $RegexAsset -Arguments $DirectArguments -ExpectedSHA256 $ExpectedSHA256 -DirectUrl $DirectUrl -DirectFileName $DirectFileName -ExpectedSigner $ExpectedSigner
+                $attempts.Add((New-JWADAttempt -Method 'Direct' -Outcome 'SUCCESS' -Message $r.Detail -ExitCode $r.ExitCode))
+                $finalStatus = $r.Status
+                $finalMethod = 'Direct'
+                $finalVersion = $r.Version
+                $finalError = $null
+            }
+            catch {
+                $message = $_.Exception.Message
+                $attempts.Add((New-JWADAttempt -Method 'Direct' -Outcome 'FAILED' -Message $message))
+                $finalError = $message
+            }
+        }
+        else {
+            $attempts.Add((New-JWADAttempt -Method 'Direct' -Outcome 'NOT_CONFIGURED' -Message 'SIN INFORMACIÓN: no existe una URL/release directa validada para esta aplicación.'))
+        }
+    }
 
-# App 2: Bulk Crap Uninstaller (Winget)
-# NOTA: el ID correcto en el repositorio de winget es "Klocman.BulkCrapUninstaller"
-# (el usado antes, "BCUninstaller.BulkCrapUninstaller", no existe y causaba el
-# error "paquete no encontrado"). El instalador es Inno Setup: los switches
-# silenciosos correctos son /VERYSILENT /SUPPRESSMSGBOXES /NORESTART.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Bulk Crap Uninstaller"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Bulk Crap Uninstaller" -WingetId "Klocman.BulkCrapUninstaller" -Arguments "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"))
+    $timer.Stop()
+    if ($finalMethod -eq 'NONE') {
+        $finalStatus = 'FAILED'
+        $finalMethod = 'NONE'
+    }
+    $result = New-JWADResult -Name $AppName -Status $finalStatus -Method $finalMethod -Version $finalVersion -Seconds $timer.Elapsed.TotalSeconds -Attempts $attempts.ToArray() -ErrorMessage $finalError
+    $script:InstallResults.Add($result)
 
-# App 3: SumatraPDF (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "SumatraPDF"
-$ResultadosList.Add((Install-AppViaWinget -AppName "SumatraPDF" -WingetId "SumatraPDF.SumatraPDF"))
-
-# App 4: AB Download Manager (GitHub - Descarga Directa)
-# NOTA: el instalador es NSIS; el switch silencioso correcto es /S (no /SILENT,
-# que no es reconocido por NSIS y provocaba el Exit Code 1).
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "AB Download Manager"
-$ResultadosList.Add((Install-AppViaDirectUrl -AppName "AB Download Manager" -Repo "amir1376/ab-download-manager" -AssetFilter "Setup" -Arguments "/S"))
-
-# App 5: WinRAR x64 (ES) (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "WinRAR x64"
-$ResultadosList.Add((Install-AppViaWinget -AppName "WinRAR x64" -WingetId "RARLab.WinRAR" -Arguments "/S"))
-
-# App 6: VLC Media Player (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "VLC Media Player"
-$ResultadosList.Add((Install-AppViaWinget -AppName "VLC Media Player" -WingetId "VideoLAN.VLC" -Arguments "/S"))
-
-# App 7: Google Chrome (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Google Chrome"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Google Chrome" -WingetId "Google.Chrome" -Arguments "/silent /install"))
-
-# App 8: Mozilla Firefox (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mozilla Firefox"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Mozilla Firefox" -WingetId "Mozilla.Firefox" -Arguments "-ms"))
-
-# App 9: Mullvad Browser (Winget)
-# NOTA: el ID correcto en el repositorio de winget es "MullvadVPN.MullvadBrowser"
-# (el usado antes, "Mullvad.MullvadBrowser", no existe y causaba el error
-# "paquete no encontrado"). El instalador es NSIS, switch silencioso /S.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mullvad Browser"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Mullvad Browser" -WingetId "MullvadVPN.MullvadBrowser" -Arguments "/S"))
-
-# App 10: Microsoft Edge para Empresas (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Microsoft Edge"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Microsoft Edge" -WingetId "Microsoft.Edge" -Arguments "/silent"))
-
-# App 11: FlyPhotos (GitHub - Descarga Directa)
-# NOTA: el instalador es MSI; no se envia -Arguments porque el switch previo
-# (/S) no es valido para msiexec y provocaba el Exit Code 1639. La funcion ya
-# aplica /qn /norestart de forma nativa para instaladores MSI.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "FlyPhotos"
-$ResultadosList.Add((Install-AppViaDirectUrl -AppName "FlyPhotos" -Repo "riyasy/FlyPhotos" -AssetFilter "Setup"))
-
-# 5. RECOPILACION DE TELEMETRIA DEL HARDWARE Y DEL SISTEMA
-Write-Host "`n=========================================================" -ForegroundColor Cyan
-Write-Host " RECOPILANDO TELEMETRIA Y ESPECIFICACIONES DEL SISTEMA" -ForegroundColor Cyan
-Write-Host "=========================================================" -ForegroundColor Cyan
-
-$ComputerSystem = Get-CimInstance Win32_ComputerSystem
-$OperatingSystem = Get-CimInstance Win32_OperatingSystem
-$ProcessorInfo = Get-CimInstance Win32_Processor
-
-$Fabricante = $ComputerSystem.Manufacturer
-$Modelo = $ComputerSystem.Model
-$Procesador = $ProcessorInfo.Name
-$Arquitectura = $env:PROCESSOR_ARCHITECTURE
-
-# RAM total y en uso
-$RAMTotalBytes = ($ComputerSystem.TotalPhysicalMemory)
-if (-not $RAMTotalBytes) {
-    $RAMTotalBytes = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum
+    $statusLabel = if ($finalStatus -like 'INSTALLED*') { 'OK' } else { 'FAILED' }
+    Write-JWADMessage -Level $statusLabel -Message ('{0}: {1} mediante {2}' -f $AppName, $finalStatus, $finalMethod)
+    return $result
 }
-$RAMTotalGB = [Math]::Round($RAMTotalBytes / 1GB, 2)
-$RAMLibreKB = $OperatingSystem.FreePhysicalMemory
-$RAMTotalKB = $OperatingSystem.TotalVisibleMemorySize
-$RAMUsadaKB = $RAMTotalKB - $RAMLibreKB
-$RAMUsoPct = [Math]::Round(($RAMUsadaKB / $RAMTotalKB) * 100, 2)
 
-# Almacenamiento total y en uso (C:)
-$DiscoC = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
-$DiscoTotalGB = [Math]::Round($DiscoC.Size / 1GB, 2)
-$DiscoLibreGB = [Math]::Round($DiscoC.FreeSpace / 1GB, 2)
-$DiscoUsadoGB = $DiscoTotalGB - $DiscoLibreGB
-$DiscoUsoPct = [Math]::Round(($DiscoUsadoGB / $DiscoTotalGB) * 100, 2)
+# -----------------------------------------------------------------------------
+# VALIDACION DE .NET FRAMEWORK 4.x (NO SE FUERZA REINSTALACION)
+# -----------------------------------------------------------------------------
+function Test-JWADDotNetFramework {
+    [CmdletBinding()]
+    param()
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $key = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Stop
+        $release = [int]$key.Release
+        $timer.Stop()
+        if ($release -ge 528040) {
+            return (New-JWADResult -Name '.NET Framework 4.8+' -Status 'VALIDATED' -Method 'Registry' -Version ('Release {0}' -f $release) -Seconds $timer.Elapsed.TotalSeconds)
+        }
+        return (New-JWADResult -Name '.NET Framework 4.8+' -Status 'OUTDATED' -Method 'Registry' -Version ('Release {0}' -f $release) -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage 'Actualizar mediante Windows Update o el instalador oficial correspondiente.')
+    }
+    catch {
+        $timer.Stop()
+        return (New-JWADResult -Name '.NET Framework 4.8+' -Status 'UNKNOWN' -Method 'Registry' -Version 'N/A' -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage $_.Exception.Message)
+    }
+}
 
-# Diagnosticos de Temperatura
-$LecturasTemp = [System.Collections.Generic.List[PSCustomObject]]::new()
-$TempFinal = $null
+# -----------------------------------------------------------------------------
+# TELEMETRIA ROBUSTA: SI FALLA, NO INVALIDA LOS RESULTADOS DE INSTALACION
+# -----------------------------------------------------------------------------
+function Get-JWADTelemetry {
+    [CmdletBinding()]
+    param()
 
-# Metodo 1: CIM_ThermalZone
+    $specs = [ordered]@{
+        fabricante = $null
+        modelo = $null
+        procesador = $null
+        arquitectura = $env:PROCESSOR_ARCHITECTURE
+        memoria_ram_total_gb = $null
+        uso_actual_ram_porcentaje = $null
+        almacenamiento_total_gb = $null
+        uso_actual_almacenamiento_porcentaje = $null
+        sistema_operativo = $null
+        version_sistema = $null
+    }
+    $temperatureReadings = New-Object 'System.Collections.Generic.List[object]'
+    $finalTemp = $null
+    $telemetryErrors = New-Object 'System.Collections.Generic.List[string]'
+
+    try {
+        $computer = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        $specs.fabricante = $computer.Manufacturer
+        $specs.modelo = $computer.Model
+        $ramBytes = [double]$computer.TotalPhysicalMemory
+        if ($ramBytes -gt 0) { $specs.memoria_ram_total_gb = [Math]::Round($ramBytes / 1GB, 2) }
+    }
+    catch { $telemetryErrors.Add(('Win32_ComputerSystem: {0}' -f $_.Exception.Message)) }
+
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $specs.sistema_operativo = $os.Caption
+        $specs.version_sistema = $os.Version
+        $totalKB = [double]$os.TotalVisibleMemorySize
+        $freeKB = [double]$os.FreePhysicalMemory
+        if ($totalKB -gt 0) { $specs.uso_actual_ram_porcentaje = [Math]::Round((($totalKB - $freeKB) / $totalKB) * 100, 2) }
+    }
+    catch { $telemetryErrors.Add(('Win32_OperatingSystem: {0}' -f $_.Exception.Message)) }
+
+    try {
+        $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        if ($cpu) { $specs.procesador = $cpu.Name }
+    }
+    catch { $telemetryErrors.Add(('Win32_Processor: {0}' -f $_.Exception.Message)) }
+
+    try {
+        $disk = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop | Select-Object -First 1
+        if ($disk -and [double]$disk.Size -gt 0) {
+            $specs.almacenamiento_total_gb = [Math]::Round(([double]$disk.Size / 1GB), 2)
+            $specs.uso_actual_almacenamiento_porcentaje = [Math]::Round(((1 - ([double]$disk.FreeSpace / [double]$disk.Size)) * 100), 2)
+        }
+    }
+    catch { $telemetryErrors.Add(('Win32_LogicalDisk: {0}' -f $_.Exception.Message)) }
+
+    try {
+        $zone = Get-CimInstance -Namespace 'root/wmi' -ClassName 'MSAcpi_ThermalZoneTemperature' -ErrorAction Stop | Select-Object -First 1
+        if ($zone -and $null -ne $zone.CurrentTemperature) {
+            # CurrentTemperature: décimas de Kelvin; 2732 equivale a 273.2 K.
+            $finalTemp = [Math]::Round((([double]$zone.CurrentTemperature - 2732) / 10), 2)
+            $temperatureReadings.Add([PSCustomObject]@{ metodo = 'MSAcpi_ThermalZoneTemperature'; valor_celsius = $finalTemp; estado = 'SUCCESS' })
+        }
+        else {
+            $temperatureReadings.Add([PSCustomObject]@{ metodo = 'MSAcpi_ThermalZoneTemperature'; valor_celsius = $null; estado = 'UNSUPPORTED' })
+        }
+    }
+    catch {
+        $temperatureReadings.Add([PSCustomObject]@{ metodo = 'MSAcpi_ThermalZoneTemperature'; valor_celsius = $null; estado = 'UNAVAILABLE' })
+    }
+
+    return [PSCustomObject]@{
+        specs_computador = $specs
+        diagnosticos_temperatura = [ordered]@{
+            lecturas = $temperatureReadings.ToArray()
+            temperatura_final_corroborada = $finalTemp
+        }
+        errores_telemetria = $telemetryErrors.ToArray()
+    }
+}
+
+# -----------------------------------------------------------------------------
+# PRECONDICIONES Y CATALOGO
+# -----------------------------------------------------------------------------
+Write-Host ''
+Write-Host '============================================================' -ForegroundColor Cyan
+Write-Host (' WINDOWS APP DEPLOYER - JWAD v{0}' -f $script:JWADVersion) -ForegroundColor Cyan
+Write-Host ' Fallback: Winget -> Scoop -> Descarga directa verificada' -ForegroundColor DarkCyan
+Write-Host '============================================================' -ForegroundColor Cyan
+
+if (-not [Environment]::Is64BitOperatingSystem -or
+    ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64')) {
+    Write-JWADMessage -Level 'ERROR' -Message 'Este despliegue requiere un sistema operativo Windows x64 (AMD64).'
+    return
+}
+$osVersion = [Environment]::OSVersion.Version
+if ($osVersion.Major -lt 10 -or $osVersion.Build -lt 10240) {
+    Write-JWADMessage -Level 'ERROR' -Message ('Se requiere Windows 10/11 (build 10240 o posterior). Detectado: {0}.' -f $osVersion)
+    return
+}
+$clientWindowsValidated = $false
+$osDescription = ''
 try {
-    $CimZones = Get-CimInstance -Namespace "root/cimv2" -ClassName "Win32_TemperatureSensor" -ErrorAction Stop
-    if ($CimZones -and $CimZones.CurrentReading) {
-        $ValCelsius = $CimZones.CurrentReading
-        $LecturasTemp.Add([PSCustomObject]@{
-            metodo = "CIM_ThermalZone"
-            valor_celsius = $ValCelsius
-            estado = "SUCCESS"
-        })
-        $TempFinal = $ValCelsius
-    } else {
-        throw "Sin lecturas en Win32_TemperatureSensor"
-    }
-} catch {
-    $LecturasTemp.Add([PSCustomObject]@{
-        metodo = "CIM_ThermalZone"
-        valor_celsius = $null
-        estado = "UNSUPPORTED"
-    })
+    $osIdentity = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+    $osDescription = [string]$osIdentity.Caption
+    $clientWindowsValidated = ([int]$osIdentity.ProductType -eq 1 -and $osDescription -match 'Windows 10|Windows 11')
 }
-
-# Metodo 2: WMI_MSAcpi
-try {
-    $WmiZones = Get-CimInstance -Namespace "root/wmi" -ClassName "MSAcpi_ThermalZoneTemperature" -ErrorAction Stop
-    if ($WmiZones) {
-        # La lectura es en decimas de Kelvin (ej: 3002 = 300.2 Kelvin)
-        $ValCelsius = [Math]::Round((($WmiZones.CurrentTemperature) - 2732) / 10, 2)
-        $LecturasTemp.Add([PSCustomObject]@{
-            metodo = "WMI_MSAcpi"
-            valor_celsius = $ValCelsius
-            estado = "SUCCESS"
-        })
-        if ($null -eq $TempFinal) { $TempFinal = $ValCelsius }
-    } else {
-        throw "Sin lecturas en MSAcpi_ThermalZoneTemperature"
+catch {
+    # En algunas imágenes LTSC/WMI restringidas, se usa el registro como respaldo.
+    try {
+        $productType = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ProductOptions' -Name ProductType -ErrorAction Stop).ProductType
+        $productName = [string](Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name ProductName -ErrorAction Stop).ProductName
+        $osDescription = $productName
+        $clientWindowsValidated = ($productType -eq 'WinNT' -and $productName -match 'Windows 10|Windows 11')
     }
-} catch {
-    $LecturasTemp.Add([PSCustomObject]@{
-        metodo = "WMI_MSAcpi"
-        valor_celsius = $null
-        estado = "HARDWARE_LOCKED"
-    })
-}
-
-# Detener el cronometro total
-$TiempoTotalSw.Stop()
-$TiempoTotalSegundos = [Math]::Round($TiempoTotalSw.Elapsed.TotalSeconds, 2)
-
-# 6. EXPORTAR REPORTE JSON
-$ReporteJSON = [Ordered]@{
-    timestamp = (Get-Date -Format "o")
-    specs_computador = [Ordered]@{
-        fabricante = $Fabricante
-        modelo     = $Modelo
-        procesador = $Procesador
-        arquitectura = $Arquitectura
-        memoria_ram_total_gb = $RAMTotalGB
-        uso_actual_ram_porcentaje = $RAMUsoPct
-        almacenamiento_total_gb = $DiscoTotalGB
-        uso_actual_almacenamiento_porcentaje = $DiscoUsoPct
-    }
-    diagnosticos_temperatura = [Ordered]@{
-        lecturas = $LecturasTemp
-        temperatura_final_corroborada = $TempFinal
-    }
-    reporte_instalacion = [Ordered]@{
-        tiempo_total_ejecucion_segundos = $TiempoTotalSegundos
-        resultado_aplicaciones = $ResultadosList
+    catch {
+        Write-JWADMessage -Level 'ERROR' -Message ('No fue posible validar el tipo de Windows mediante CIM ni registro: {0}' -f $_.Exception.Message)
+        return
     }
 }
-
-$ReporteJSON | ConvertTo-Json -Depth 5 | Out-File -FilePath $ReportePath -Encoding utf8 -Force
-
-# 7. VISUALIZACION DEL REPORTE FINAL EN CONSOLA
-Write-Host "`n=========================================================" -ForegroundColor Green
-Write-Host " REPORTE FINAL DE DESPLIEGUE Y TELEMETRIA" -ForegroundColor Green
-Write-Host "=========================================================" -ForegroundColor Green
-
-Write-Host "[-] Fecha y Hora: $(Get-Date -Format "dd/MM/yyyy HH:mm:ss")"
-Write-Host "[-] Equipo: $Fabricante $Modelo"
-Write-Host "[-] Procesador: $Procesador"
-Write-Host "[-] Memoria RAM: $RAMTotalGB GB (En uso: $RAMUsoPct %)"
-Write-Host "[-] Disco (C:): $DiscoTotalGB GB (En uso: $DiscoUsoPct %)"
-if ($null -ne $TempFinal) {
-    Write-Host "[-] Temperatura CPU: $TempFinal C" -ForegroundColor Yellow
-} else {
-    Write-Host "[-] Temperatura CPU: No disponible (Hardware bloqueado o no soportado)" -ForegroundColor Gray
+if (-not $clientWindowsValidated) {
+    Write-JWADMessage -Level 'ERROR' -Message ('El sistema detectado no es un cliente Windows 10/11 admitido: {0}.' -f $osDescription)
+    return
 }
-Write-Host "[-] Tiempo Total de Ejecucion: $TiempoTotalSegundos segundos" -ForegroundColor Cyan
-Write-Host "[-] Archivo de Reporte Creado en: $ReportePath" -ForegroundColor Green
-
-Write-Host "`n[-] Estado de las Instalaciones:" -ForegroundColor Gray
-foreach ($App in $ResultadosList) {
-    $Color = "Green"
-    if ($App.estado -eq "FAILED") { $Color = "Red" }
-    elseif ($App.estado -eq "DESACTUALIZADO") { $Color = "Yellow" }
-    Write-Host "    * [$($App.estado)] $($App.app_name) - Version: $($App.version_instalada) ($($App.tiempo_instalacion_segundos)s)" -ForegroundColor $Color
+$script:JWADIsAdmin = Test-JWADAdministrator
+if ($script:JWADIsAdmin) {
+    Write-JWADMessage -Level 'INFO' -Message 'Contexto elevado detectado.'
 }
-Write-Host "`n=========================================================" -ForegroundColor Green
-Write-Host " Proceso de automatizacion finalizado con exito." -ForegroundColor Green
-Write-Host "=========================================================" -ForegroundColor Green
+else {
+    Write-JWADMessage -Level 'WARN' -Message 'Contexto no elevado. Algunos instaladores podrán requerir permisos administrativos/UAC.'
+}
+Write-JWADMessage -Level 'INFO' -Message ('PowerShell {0}; SO {1}-bit.' -f $PSVersionTable.PSVersion, $(if ([Environment]::Is64BitOperatingSystem) { 64 } else { 32 }))
 
-#====================================================================
-# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
-# Firma ASCII de cierre, version reducida del banner de apertura.
-#====================================================================
-$JWADBannerPequeno = @(
-    '    ___      ___   ___  ',
-    ' _ | \ \    / /_\ |   \ ',
-    '| || |\ \/\/ / _ \| |) |',
-    ' \__/  \_/\_/_/ \_\___/ '
+# El catálogo mantiene datos por paquete. Los campos vacíos son deliberados:
+# no se inventan IDs, manifiestos, assets ni argumentos silenciosos.
+$apps = @(
+    [PSCustomObject]@{
+        Name = 'Visual C++ Redistributable x64'; WingetId = 'Microsoft.VCRedist.2015+.x64'; WingetCustomArgs = '';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '/install /quiet /norestart';
+        ExpectedSHA256 = ''; DirectUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'; DirectFileName = 'vc_redist.x64.exe'; ExpectedSigner = 'Microsoft Corporation'
+    },
+    [PSCustomObject]@{
+        Name = 'Java Runtime Environment - Temurin 21 JRE'; WingetId = 'EclipseAdoptium.Temurin.21.JRE'; WingetCustomArgs = '';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = '7-Zip'; WingetId = '7zip.7zip'; WingetCustomArgs = '';
+        ScoopName = '7zip'; ScoopBucket = 'main'; GitHubRepo = 'ip7z/7zip'; RegexAsset = '(?i)^7z[0-9]+-x64\.msi$'; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'Bulk Crap Uninstaller'; WingetId = 'Klocman.BulkCrapUninstaller'; WingetCustomArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'SumatraPDF'; WingetId = 'SumatraPDF.SumatraPDF'; WingetCustomArgs = '';
+        ScoopName = 'sumatrapdf'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'AB Download Manager'; WingetId = ''; WingetCustomArgs = '';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = 'amir1376/ab-download-manager'; RegexAsset = '(?i)^(?!.*(arm64|aarch64|arm)).*(x64|win64|amd64).*\.(exe)$'; DirectArguments = '/S';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'WinRAR x64'; WingetId = 'RARLab.WinRAR'; WingetCustomArgs = '/S';
+        ScoopName = 'winrar'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'VLC Media Player'; WingetId = 'VideoLAN.VLC'; WingetCustomArgs = '/S';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'Google Chrome'; WingetId = 'Google.Chrome'; WingetCustomArgs = '/silent /install';
+        ScoopName = 'googlechrome'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'Mozilla Firefox'; WingetId = 'Mozilla.Firefox'; WingetCustomArgs = '-ms';
+        ScoopName = 'firefox'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '/S';
+        ExpectedSHA256 = ''; DirectUrl = 'https://download.mozilla.org/?product=firefox-latest-ssl&os=win64&lang=en-US'; DirectFileName = 'firefox-installer.exe'; ExpectedSigner = 'Mozilla Corporation'
+    },
+    [PSCustomObject]@{
+        Name = 'Mullvad Browser'; WingetId = 'MullvadVPN.MullvadBrowser'; WingetCustomArgs = '/S';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'Microsoft Edge'; WingetId = 'Microsoft.Edge'; WingetCustomArgs = '/silent';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    },
+    [PSCustomObject]@{
+        Name = 'FlyPhotos'; WingetId = ''; WingetCustomArgs = '';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = 'riyasy/FlyPhotos'; RegexAsset = '(?i)^(?!.*(arm64|aarch64|arm)).*(x64|win64|amd64).*\.msi$'; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = ''
+    }
 )
 
-Write-Host ""
-foreach ($JWADLinea in $JWADBannerPequeno) {
-    Write-Host "  $JWADLinea" -ForegroundColor DarkGray
+# Total = 13 pasos de aplicación (VC++, Java + 11 apps) y una validación .NET.
+$totalSteps = $apps.Count + 1
+$step = 0
+
+Write-Host ''
+Write-JWADMessage -Level 'TITLE' -Message 'INICIO DE INSTALACIONES'
+foreach ($app in $apps) {
+    $step++
+    Show-JWADProgress -Current $step -Total $totalSteps -Label $app.Name
+    [void](Install-UniversalApp -AppName $app.Name -WingetId $app.WingetId -WingetCustomArgs $app.WingetCustomArgs -ScoopName $app.ScoopName -ScoopBucket $app.ScoopBucket -GitHubRepo $app.GitHubRepo -RegexAsset $app.RegexAsset -DirectArguments $app.DirectArguments -ExpectedSHA256 $app.ExpectedSHA256 -DirectUrl $app.DirectUrl -DirectFileName $app.DirectFileName -ExpectedSigner $app.ExpectedSigner)
 }
-Write-Host "  javizcape.github.io/JWAD" -ForegroundColor DarkGray
-Write-Host ""
+
+$step++
+Show-JWADProgress -Current $step -Total $totalSteps -Label '.NET Framework 4.8+ (validación)'
+$dotNetResult = Test-JWADDotNetFramework
+$script:InstallResults.Add($dotNetResult)
+if ($dotNetResult.estado -eq 'VALIDATED') {
+    Write-JWADMessage -Level 'OK' -Message ('.NET Framework validado: {0}' -f $dotNetResult.version_instalada)
+}
+else {
+    Write-JWADMessage -Level 'WARN' -Message ('.NET Framework: {0}' -f $dotNetResult.estado)
+}
+
+# -----------------------------------------------------------------------------
+# TELEMETRIA Y EXPORTACION JSON
+# -----------------------------------------------------------------------------
+$telemetry = $null
+if (-not $SkipTelemetry) {
+    Write-JWADMessage -Level 'INFO' -Message 'Recopilando telemetría del equipo...'
+    try { $telemetry = Get-JWADTelemetry }
+    catch { $telemetry = [PSCustomObject]@{ specs_computador = @{}; diagnosticos_temperatura = @{}; errores_telemetria = @($_.Exception.Message) } }
+}
+else {
+    $telemetry = [PSCustomObject]@{ specs_computador = @{}; diagnosticos_temperatura = @{}; errores_telemetria = @('Omitida por -SkipTelemetry.') }
+}
+
+$script:JWADStarted.Stop()
+$failed = @($script:InstallResults | Where-Object { $_.estado -eq 'FAILED' }).Count
+$validationPending = @($script:InstallResults | Where-Object { $_.estado -in @('OUTDATED', 'UNKNOWN') }).Count
+$report = [ordered]@{
+    version_script = $script:JWADVersion
+    timestamp = (Get-Date -Format 'o')
+    equipo = $env:COMPUTERNAME
+    usuario_ejecucion = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    contexto_administrador = $script:JWADIsAdmin
+    powershell_version = [string]$PSVersionTable.PSVersion
+    arquitectura_so = $env:PROCESSOR_ARCHITECTURE
+    tiempo_total_ejecucion_segundos = [Math]::Round($script:JWADStarted.Elapsed.TotalSeconds, 2)
+    resumen = [ordered]@{
+        total_registros = $script:InstallResults.Count
+        instalaciones_fallidas = $failed
+        validaciones_pendientes = $validationPending
+        instalaciones_exitosas = @($script:InstallResults | Where-Object { $_.estado -like 'INSTALLED*' -or $_.estado -eq 'VALIDATED' }).Count
+    }
+    specs_computador = $telemetry.specs_computador
+    diagnosticos_temperatura = $telemetry.diagnosticos_temperatura
+    errores_telemetria = $telemetry.errores_telemetria
+    resultado_aplicaciones = $script:InstallResults.ToArray()
+    configuracion_respaldo = [ordered]@{
+        scoop_disponible_durante_ejecucion = $script:ScoopBootstrapSucceeded
+        scoop_admin_autorizado = ($env:JWAD_ALLOW_SCOOP_ADMIN -eq '1')
+        github_api_base_configurada = (-not [string]::IsNullOrWhiteSpace($env:JWAD_GITHUB_API_BASE))
+        github_download_mirror_configurado = (-not [string]::IsNullOrWhiteSpace($env:JWAD_GITHUB_DOWNLOAD_BASE))
+        scoop_main_mirror_configurado = (-not [string]::IsNullOrWhiteSpace($env:JWAD_SCOOP_MAIN_URL))
+        scoop_extras_mirror_configurado = (-not [string]::IsNullOrWhiteSpace($env:JWAD_SCOOP_EXTRAS_URL))
+        github_token_configurado = (-not [string]::IsNullOrWhiteSpace($env:JWAD_GITHUB_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GH_TOKEN) -or -not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN))
+    }
+}
+
+try {
+    $json = $report | ConvertTo-Json -Depth 8
+    Set-Content -LiteralPath $script:ReportPath -Value $json -Encoding UTF8
+    Write-JWADMessage -Level 'OK' -Message ('Reporte JSON guardado: {0}' -f $script:ReportPath)
+}
+catch {
+    Write-JWADMessage -Level 'ERROR' -Message ('No se pudo guardar el reporte JSON: {0}' -f $_.Exception.Message)
+}
+
+# -----------------------------------------------------------------------------
+# RESUMEN FINAL
+# -----------------------------------------------------------------------------
+Write-Host ''
+Write-Host '============================================================' -ForegroundColor Green
+Write-Host ' RESUMEN FINAL JWAD' -ForegroundColor Green
+Write-Host '============================================================' -ForegroundColor Green
+foreach ($item in $script:InstallResults) {
+    $color = 'Green'
+    if ($item.estado -eq 'FAILED') { $color = 'Red' }
+    elseif ($item.estado -in @('OUTDATED', 'UNKNOWN')) { $color = 'Yellow' }
+    Write-Host ('[{0}] {1} | método={2} | versión={3} | {4}s' -f $item.estado, $item.app_name, $item.metodo_instalacion, $item.version_instalada, $item.tiempo_instalacion_segundos) -ForegroundColor $color
+}
+Write-Host ''
+Write-Host ('Fallos: {0} | Validaciones pendientes: {1} | Reporte: {2}' -f $failed, $validationPending, $script:ReportPath) -ForegroundColor Cyan
+Write-Host ('Log: {0}' -f $script:LogPath) -ForegroundColor DarkGray
+if ($failed -gt 0 -or $validationPending -gt 0) {
+    Write-JWADMessage -Level 'WARN' -Message ('El proceso terminó con {0} fallos de instalación y {1} validaciones pendientes. Consulte el JSON/log.' -f $failed, $validationPending)
+}
+else {
+    Write-JWADMessage -Level 'OK' -Message 'No se registraron fallos de instalación ni validaciones pendientes.'
+}
