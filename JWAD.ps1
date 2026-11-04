@@ -1,35 +1,35 @@
 #====================================================================
 # SCRIPT DE IMPLEMENTACION MASIVA DE APLICACIONES (Windows x64)
 #====================================================================
-# Version: 2.2 (Corregida - Septiembre 2026)
-# Autor: Arquitectura de Sistemas y Gobernanza Autonoma - Gemini Notebook
+# Version: 3.0 (Enterprise Resilient - Septiembre 2026)
+# Autor: Arquitectura de Sistemas y Gobernanza Autonoma - JWAD
 # Alojado en: https://javizcape.github.io/JWAD/JWAD.ps1
 # Ejecucion:  irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
 #====================================================================
 
 $ErrorActionPreference = "Stop"
 
-# Este script esta disenado para ejecutarse UNICAMENTE via:
-#   irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
-# Nunca se ejecuta como archivo local, por lo que $PSCommandPath jamas
-# existe y no debe usarse. Si cambias de repositorio o de ruta, actualiza
-# esta URL antes de publicar.
-$ScriptRemoteUrl = "https://javizcape.github.io/JWAD/JWAD.ps1"
+# Force TLS 1.2 desde el inicio de la sesion
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+$ScriptRemoteUrl = "https://javizcape.github.io/JWAD/JWAD.ps1"
 $DesktopPath = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
 $ReportePath = Join-Path $DesktopPath "Reporte_Despliegue.json"
 $TiempoTotalSw = [System.Diagnostics.Stopwatch]::StartNew()
 
+# Variables de estado global para auditoria incremental (Hot-Writing)
+$Global:ResultadosList = [System.Collections.Generic.List[PSCustomObject]]::new()
+$Global:Fabricante = "Desconocido"
+$Global:Modelo = "Desconocido"
+$Global:Procesador = "Desconocido"
+$Global:RAMTotalGB = 0
+$Global:RAMUsoPct = 0
+$Global:DiscoTotalGB = 0
+$Global:DiscoUsoPct = 0
+$Global:TempFinal = $null
+
 #====================================================================
-# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
-# Banner de apertura en ASCII PURO (sin caracteres Unicode de bloque/
-# caja): la version anterior usaba glifos de bloque Unicode que, al viajar
-# por el pipeline "irm | iex" (descarga remota + interpretacion del
-# codigo), pueden llegar a decodificarse con la pagina de codigos
-# incorrecta (ANSI/CP1252 en vez de UTF-8) y mostrarse como texto
-# corrupto (mojibake). Usando solo caracteres ASCII (\ _ | / =) se
-# garantiza que el logo se vea igual de bien en cualquier consola,
-# igual que ya ocurre con la firma pequena del cierre.
+# CAPA DE PRESENTACION - Banner ASCII Puro
 #====================================================================
 $JWADBannerGrande = @(
     '     ___        ___    ____  ',
@@ -45,48 +45,81 @@ Write-Host "  ============================================" -ForegroundColor Cya
 for ($i = 0; $i -lt $JWADBannerGrande.Count; $i++) {
     Write-Host "  $($JWADBannerGrande[$i])" -ForegroundColor $JWADGradiente[$i]
 }
-Write-Host "         WINDOWS APP DEPLOYER - v2.2" -ForegroundColor DarkCyan
+Write-Host "         WINDOWS APP DEPLOYER - v3.0" -ForegroundColor DarkCyan
 Write-Host "  ============================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 1. VALIDACION PREVIA Y PRIVILEGIOS DE ADMINISTRADOR
+# 1. VALIDACION PREVIA Y CONTROL DE PRIVILEGIOS
 Write-Host "=========================================================" -ForegroundColor Cyan
 Write-Host " INICIANDO ANALISIS DE SISTEMA Y CONTROL DE PRIVILEGIOS" -ForegroundColor Cyan
 Write-Host "=========================================================" -ForegroundColor Cyan
 
-# Validar Arquitectura x64
 if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64" -and $env:PROCESSOR_ARCHITEW6432 -ne "AMD64") {
     Write-Host "[ERROR FATAL] Este script solo es compatible con la arquitectura Windows x64 (AMD64)." -ForegroundColor Red
     return
 }
 Write-Host "[OK] Arquitectura compatible verificada: x64" -ForegroundColor Green
 
-# Validar que la URL remota fue configurada (requisito para poder re-elevar)
 if (-not $ScriptRemoteUrl -or $ScriptRemoteUrl -like "*tuusuario*") {
-    Write-Host "[ERROR FATAL] ScriptRemoteUrl no esta configurada. Edita la variable al inicio del script con la URL publica real antes de publicarlo." -ForegroundColor Red
+    Write-Host "[ERROR FATAL] ScriptRemoteUrl no esta configurada adecuadamente." -ForegroundColor Red
     return
 }
 
-# Validar Privilegios de Administrador
 $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $IsAdmin) {
     Write-Warning "[ADVERTENCIA] El script no se esta ejecutando como Administrador."
     Write-Host "[*] Intentando elevar privilegios (se abrira una nueva ventana elevada)..." -ForegroundColor Yellow
     try {
-        # No hay archivo fisico en disco (ejecucion via irm | iex), asi que el
-        # proceso elevado vuelve a descargar y ejecutar el script desde la URL remota.
         $Comando = "irm $ScriptRemoteUrl | iex"
         Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$Comando`"" -Verb RunAs | Out-Null
     } catch {
-        Write-Host "[ERROR FATAL] Se requieren privilegios de Administrador para realizar las instalaciones. $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[ERROR FATAL] Se requieren privilegios de Administrador. $($_.Exception.Message)" -ForegroundColor Red
     }
-    # Se usa 'return' (no 'exit') para no cerrar la ventana de PowerShell
-    # original del usuario; la instalacion real continua en la ventana elevada.
     return
 }
 Write-Host "[OK] Privilegios de Administrador confirmados." -ForegroundColor Green
 
-# 2. DEFINICION DE FUNCIONES DE INSTALACION
+#====================================================================
+# FUNCIONES NUCLEO (Hot-Writing, Environment Refresh, Timeouts)
+#====================================================================
+
+function Update-Environment {
+    foreach ($level in "Machine", "User") {
+        [Environment]::GetEnvironmentVariables($level).GetEnumerator() | ForEach-Object {
+            if ($_.Key -eq 'Path') {
+                $env:Path += ";$($_.Value)"
+            }
+        }
+    }
+}
+
+function Save-IncrementalReport {
+    try {
+        $ReporteJSON = [Ordered]@{
+            timestamp = (Get-Date -Format "o")
+            specs_computador = [Ordered]@{
+                fabricante = $Global:Fabricante
+                modelo     = $Global:Modelo
+                procesador = $Global:Procesador
+                memoria_ram_total_gb = $Global:RAMTotalGB
+                uso_actual_ram_porcentaje = $Global:RAMUsoPct
+                almacenamiento_total_gb = $Global:DiscoTotalGB
+                uso_actual_almacenamiento_porcentaje = $Global:DiscoUsoPct
+            }
+            diagnosticos_temperatura = [Ordered]@{
+                temperatura_final_corroborada = $Global:TempFinal
+            }
+            reporte_instalacion = [Ordered]@{
+                tiempo_transcurrido_segundos = [Math]::Round($TiempoTotalSw.Elapsed.TotalSeconds, 2)
+                resultado_aplicaciones = $Global:ResultadosList
+            }
+        }
+        $ReporteJSON | ConvertTo-Json -Depth 5 | Out-File -FilePath $ReportePath -Encoding utf8 -Force
+    } catch {
+        # Escritura silenciosa para evitar pausar el flujo principal
+    }
+}
+
 function Install-AppViaWinget {
     param (
         [string]$AppName,
@@ -98,38 +131,33 @@ function Install-AppViaWinget {
     try {
         $WingetCheck = Get-Command winget -ErrorAction SilentlyContinue
         if (-not $WingetCheck) {
-            throw "Winget no esta disponible en este sistema o no se encuentra en el PATH."
+            throw "Winget no esta disponible en este sistema."
         }
 
-        # Paso 1: validar si la aplicacion ya esta instalada ANTES de descargar
-        # o instalar nada, para no gastar recursos de forma innecesaria.
         $ListadoInstalados = & winget list --id "$WingetId" --exact --accept-source-agreements 2>$null | Out-String
         $YaInstalado = $ListadoInstalados -match [regex]::Escape($WingetId)
 
         if ($YaInstalado) {
-            # Paso 2: si ya esta instalado, se valida contra la fuente oficial
-            # (repositorio de winget) si existe una version mas nueva, en vez
-            # de asumir que "ya instalado" es un error.
-            Write-Host "[-] $AppName ya esta instalado. Verificando si existe una version mas reciente en la fuente oficial..." -ForegroundColor Gray
+            Write-Host "[-] $AppName ya esta instalado. Verificando si existe una version mas reciente..." -ForegroundColor Gray
             $WingetArgs = "upgrade --id `"$WingetId`" --silent --exact --accept-package-agreements --accept-source-agreements"
         } else {
-            Write-Host "[-] $AppName no esta instalado. Se procedera con la descarga e instalacion silenciosa (sin interfaz)." -ForegroundColor Gray
+            Write-Host "[-] $AppName no esta instalado. Procediendo con instalacion silenciosa..." -ForegroundColor Gray
             $WingetArgs = "install --id `"$WingetId`" --silent --exact --accept-package-agreements --accept-source-agreements --architecture x64"
         }
         if ($Arguments) {
             $WingetArgs += " --override `"$Arguments`""
         }
 
-        $Process = Start-Process -FilePath "winget" -ArgumentList $WingetArgs -Wait -NoNewWindow -PassThru
+        # Ejecución anti-colgamiento con Timeout de 10 minutos (600,000 ms)
+        $Process = Start-Process -FilePath "winget" -ArgumentList $WingetArgs -PassThru -NoNewWindow
+        if (-not $Process.WaitForExit(600000)) {
+            $Process | Stop-Process -Force -ErrorAction SilentlyContinue
+            throw "TIMEOUT: La instalacion excedio los 10 minutos y el proceso fue terminado."
+        }
+
         $ExitCode = $Process.ExitCode
         $AppSw.Stop()
 
-        # Codigos de retorno que representan EXITO (no un error real):
-        #   0            : Exito (instalado o actualizado)
-        #   3010         : Exito, requiere reinicio
-        #   -1978335186  : Ya estaba instalado exactamente en esa version
-        #   -1978335189  : APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
-        #                  (ya se encuentra en la ultima version disponible)
         $CodigosExito = @(0, 3010, -1978335186, -1978335189)
         if ($CodigosExito -contains $ExitCode) {
             $Estado = "INSTALLED"
@@ -137,6 +165,7 @@ function Install-AppViaWinget {
             elseif ($ExitCode -eq 3010) { $Estado = "INSTALLED_REINICIO_PENDIENTE" }
 
             Write-Host "[OK] ${AppName}: $Estado" -ForegroundColor Green
+            Update-Environment
             return [PSCustomObject]@{
                 app_name = $AppName
                 estado   = $Estado
@@ -168,18 +197,13 @@ function Install-AppViaDirectUrl {
         [string]$Arguments = ""
     )
     $AppSw = [System.Diagnostics.Stopwatch]::StartNew()
-    Write-Host "`n[*] Consultando ultima version de $AppName ($Repo) en GitHub (fuente oficial)..." -ForegroundColor Blue
+    Write-Host "`n[*] Consultando ultima version de $AppName ($Repo) en GitHub..." -ForegroundColor Blue
     try {
         $ApiUrl = "https://api.github.com/repos/$Repo/releases/latest"
-        # Forzar TLS 1.2 o superior
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         $Release = Invoke-RestMethod -Uri $ApiUrl -UseBasicParsing
         $VersionRemota = $Release.tag_name -replace '^v', ''
-        Write-Host "[-] Version mas reciente publicada: $VersionRemota" -ForegroundColor Gray
+        Write-Host "[-] Version publicada: $VersionRemota" -ForegroundColor Gray
 
-        # Paso 1: validar si ya esta instalada la misma version (o una mas
-        # reciente) ANTES de descargar nada, para no gastar recursos de forma
-        # innecesaria. Se consulta el registro de Windows.
         $RutasRegistro = @(
             'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
             'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
@@ -191,18 +215,16 @@ function Install-AppViaDirectUrl {
 
         if ($Instalado -and $Instalado.DisplayVersion) {
             $VersionLocal = $Instalado.DisplayVersion
-            Write-Host "[-] $AppName ya esta instalado (version local: $VersionLocal)." -ForegroundColor Gray
+            Write-Host "[-] $AppName instalado (version local: $VersionLocal)." -ForegroundColor Gray
             $EsVersionVigente = $false
             try {
                 $EsVersionVigente = [version]$VersionLocal -ge [version]$VersionRemota
             } catch {
-                # Si el formato de version no se puede comparar como [version],
-                # se compara como texto plano.
                 $EsVersionVigente = ($VersionLocal -eq $VersionRemota)
             }
             if ($EsVersionVigente) {
                 $AppSw.Stop()
-                Write-Host "[OK] $AppName ya se encuentra en la ultima version disponible. No se requiere descarga." -ForegroundColor Green
+                Write-Host "[OK] $AppName se encuentra en la ultima version disponible." -ForegroundColor Green
                 return [PSCustomObject]@{
                     app_name = $AppName
                     estado   = "YA_ACTUALIZADO"
@@ -211,31 +233,18 @@ function Install-AppViaDirectUrl {
                     error_mensaje = $null
                 }
             }
-            Write-Host "[-] Hay una version mas reciente disponible en el repositorio oficial. Se procedera a actualizar." -ForegroundColor Gray
-        } else {
-            Write-Host "[-] $AppName no esta instalado. Se procedera con la descarga e instalacion silenciosa (sin interfaz)." -ForegroundColor Gray
         }
 
-        # Filtrar assets compatibles con x64
         $Asset = $Release.assets | Where-Object {
             ($_.name -like "*$AssetFilter*" -or $_.name -like "*x64*" -or $_.name -like "*win64*" -or $_.name -like "*64*") -and
             ($_.name -like "*.exe" -or $_.name -like "*.msi") -and
-            ($_.name -notlike "*arm*") -and
-            ($_.name -notlike "*mac*") -and
-            ($_.name -notlike "*linux*")
+            ($_.name -notlike "*arm*") -and ($_.name -notlike "*mac*") -and ($_.name -notlike "*linux*")
         } | Select-Object -First 1
 
         if (-not $Asset) {
-            # Busqueda de respaldo generica
-            $Asset = $Release.assets | Where-Object {
-                ($_.name -like "*.exe" -or $_.name -like "*.msi") -and
-                ($_.name -notlike "*arm*")
-            } | Select-Object -First 1
+            $Asset = $Release.assets | Where-Object { ($_.name -like "*.exe" -or $_.name -like "*.msi") -and ($_.name -notlike "*arm*") } | Select-Object -First 1
         }
-
-        if (-not $Asset) {
-            throw "No se encontro ningun asset ejecutable x64 compatible."
-        }
+        if (-not $Asset) { throw "No se encontro un asset ejecutable x64 compatible." }
 
         $DownloadUrl = $Asset.browser_download_url
         $FileName = $Asset.name
@@ -244,26 +253,28 @@ function Install-AppViaDirectUrl {
         Write-Host "[-] Descargando $FileName..." -ForegroundColor Gray
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempPath -UseBasicParsing
 
-        Write-Host "[-] Instalando de forma silenciosa (sin interfaz ni asistente)..." -ForegroundColor Gray
-        $ExitCode = 0
+        Write-Host "[-] Instalando silenciosamente..." -ForegroundColor Gray
+        
         if ($FileName -like "*.msi") {
-            # Instalador MSI: los unicos switches validos para instalacion
-            # silenciosa son /qn (o /quiet) y /norestart. Cualquier switch
-            # adicional propio de instaladores EXE (por ejemplo /S) produce el
-            # error 1639 (ERROR_INVALID_COMMAND_LINE), por lo que aqui NO se
-            # reenvia el parametro -Arguments recibido.
-            $Process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$TempPath`" /qn /norestart" -Wait -NoNewWindow -PassThru
-            $ExitCode = $Process.ExitCode
+            $Process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$TempPath`" /qn /norestart" -PassThru -NoNewWindow
         } else {
-            $Process = Start-Process -FilePath $TempPath -ArgumentList $Arguments -Wait -NoNewWindow -PassThru
-            $ExitCode = $Process.ExitCode
+            $Process = Start-Process -FilePath $TempPath -ArgumentList $Arguments -PassThru -NoNewWindow
         }
 
+        # Timeout de 10 minutos (600,000 ms)
+        if (-not $Process.WaitForExit(600000)) {
+            $Process | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $TempPath -Force -ErrorAction SilentlyContinue
+            throw "TIMEOUT: La instalacion de GitHub excedio los 10 minutos."
+        }
+
+        $ExitCode = $Process.ExitCode
         Remove-Item $TempPath -Force -ErrorAction SilentlyContinue
         $AppSw.Stop()
 
         if ($ExitCode -eq 0 -or $ExitCode -eq 3010) {
-            Write-Host "[OK] $AppName instalado correctamente desde GitHub." -ForegroundColor Green
+            Write-Host "[OK] $AppName instalado correctamente." -ForegroundColor Green
+            Update-Environment
             return [PSCustomObject]@{
                 app_name = $AppName
                 estado   = "INSTALLED"
@@ -287,27 +298,6 @@ function Install-AppViaDirectUrl {
     }
 }
 
-#====================================================================
-# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
-# Barra de progreso ASCII simple y visual para seguir el avance global
-# del despliegue (complementos + 11 aplicaciones = 14 pasos).
-#
-# NOTAS DE AJUSTE:
-# - Se reemplazan los caracteres de bloque Unicode que se usaban antes
-#   por caracteres ASCII puros ('#', '.', '[', ']'), ya que al viajar
-#   por el pipeline remoto "irm | iex" podian decodificarse con la
-#   pagina de codigos incorrecta y mostrarse como texto corrupto.
-# - Se retira el porcentaje por aplicacion: como cada instalacion es
-#   una operacion atomica (via winget o msiexec en modo silencioso, sin
-#   progreso incremental real), mostrar un "%" por app era enganoso -
-#   por ejemplo, marcaba "100%" justo antes de iniciar la ultima
-#   instalacion, cuando en realidad esta ni siquiera habia comenzado.
-#   En su lugar se muestra el tiempo total transcurrido en segundos
-#   (dato real y siempre coherente, tomado del cronometro global).
-# - Paleta alineada con el resto del script (nada de magenta): azul
-#   claro/oscuro para la estructura, blanco para el dato, y verde para
-#   la porcion ya recorrida (mismo verde que usan los mensajes [OK]).
-#====================================================================
 function Show-JWADProgressBar {
     param (
         [int]$Current,
@@ -330,303 +320,195 @@ function Show-JWADProgressBar {
     Write-Host ("{0}s transcurridos" -f $SegundosTranscurridos) -ForegroundColor White
 }
 
-$JWADPasoActual = 0
-$JWADPasosTotal = 14
-
-# 3. VERIFICACION E INSTALACION DE COMPLEMENTOS PREVIOS (REQUISITOS)
-Write-Host "`n=========================================================" -ForegroundColor Cyan
-Write-Host " INSTALANDO COMPLEMENTOS DE SISTEMA REQUERIDOS" -ForegroundColor Cyan
-Write-Host "=========================================================" -ForegroundColor Cyan
-
-# Visual C++ Redistributable x64
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Visual C++ Redistributable x64"
-$VCRedistResult = Install-AppViaWinget -AppName "Visual C++ Redistributable x64" -WingetId "Microsoft.VCRedist.2015+.x64"
-
-# .NET Framework (validacion, no reinstalacion forzada)
-# NOTA TECNICA: en Windows 10/11 el .NET Framework 4.x viene incluido de
-# fabrica y se actualiza via Windows Update, no mediante DISM. El nombre de
-# caracteristica "NetFX4" usado en la version anterior de este script NO
-# existe como feature de DISM, lo cual provocaba el error 0x800f0813. Aqui
-# se valida su presencia y version consultando el registro oficial de .NET.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label ".NET Framework (validacion)"
-$NetSw = [System.Diagnostics.Stopwatch]::StartNew()
-Write-Host "[*] Verificando presencia de .NET Framework 4.x..." -ForegroundColor Blue
+#====================================================================
+# BLOQUE PRINCIPAL DE EJECUCION CON PROTECCION FINALLY
+#====================================================================
 try {
-    $NetRelease = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction Stop).Release
-    $NetSw.Stop()
-    if ($NetRelease -ge 528040) {
-        Write-Host "[OK] .NET Framework 4.8 (o superior) ya esta instalado (Release: $NetRelease)." -ForegroundColor Green
-        $NetResult = [PSCustomObject]@{
+    $JWADPasoActual = 0
+    $JWADPasosTotal = 14
+
+    Write-Host "`n=========================================================" -ForegroundColor Cyan
+    Write-Host " INSTALANDO COMPLEMENTOS DE SISTEMA REQUERIDOS" -ForegroundColor Cyan
+    Write-Host "=========================================================" -ForegroundColor Cyan
+
+    # Complemento 1: Visual C++
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Visual C++ Redistributable x64"
+    $Res = Install-AppViaWinget -AppName "Visual C++ Redistributable x64" -WingetId "Microsoft.VCRedist.2015+.x64"
+    $Global:ResultadosList.Add($Res); Save-IncrementalReport
+
+    # Complemento 2: .NET Framework (Validación)
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label ".NET Framework (validacion)"
+    $NetSw = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        $NetRelease = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction Stop).Release
+        $NetSw.Stop()
+        $EstadoNet = if ($NetRelease -ge 528040) { "YA_ACTUALIZADO" } else { "DESACTUALIZADO" }
+        $Global:ResultadosList.Add([PSCustomObject]@{
             app_name = ".NET Framework"
-            estado   = "YA_ACTUALIZADO"
+            estado   = $EstadoNet
             version_instalada = "Release $NetRelease"
             tiempo_instalacion_segundos = [Math]::Round($NetSw.Elapsed.TotalSeconds, 2)
             error_mensaje = $null
-        }
-    } else {
-        Write-Host "[AVISO] Version de .NET Framework antigua detectada (Release: $NetRelease). Se recomienda actualizar via Windows Update." -ForegroundColor Yellow
-        $NetResult = [PSCustomObject]@{
+        })
+    } catch {
+        $NetSw.Stop()
+        $Global:ResultadosList.Add([PSCustomObject]@{
             app_name = ".NET Framework"
-            estado   = "DESACTUALIZADO"
-            version_instalada = "Release $NetRelease"
+            estado   = "FAILED"
+            version_instalada = "N/A"
             tiempo_instalacion_segundos = [Math]::Round($NetSw.Elapsed.TotalSeconds, 2)
-            error_mensaje = $null
+            error_mensaje = $_.Exception.Message
+        })
+    }
+    Save-IncrementalReport
+
+    # Complemento 3: Java JRE
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Java Runtime Environment (JRE) x64"
+    $Res = Install-AppViaWinget -AppName "Java Runtime Environment" -WingetId "EclipseAdoptium.Temurin.21.JRE"
+    $Global:ResultadosList.Add($Res); Save-IncrementalReport
+
+    # 11 APLICACIONES PRINCIPALES
+    Write-Host "`n=========================================================" -ForegroundColor Cyan
+    Write-Host " INICIANDO IMPLEMENTACION DE LAS 11 APLICACIONES PRINCIPALES" -ForegroundColor Cyan
+    Write-Host "=========================================================" -ForegroundColor Cyan
+
+    # App 1: 7-Zip
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "7-Zip"
+    $Global:ResultadosList.Add((Install-AppViaWinget "7-Zip" "7zip.7zip")); Save-IncrementalReport
+
+    # App 2: Bulk Crap Uninstaller
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Bulk Crap Uninstaller"
+    $Global:ResultadosList.Add((Install-AppViaWinget "Bulk Crap Uninstaller" "Klocman.BulkCrapUninstaller" "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART")); Save-IncrementalReport
+
+    # App 3: SumatraPDF
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "SumatraPDF"
+    $Global:ResultadosList.Add((Install-AppViaWinget "SumatraPDF" "SumatraPDF.SumatraPDF")); Save-IncrementalReport
+
+    # App 4: AB Download Manager
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "AB Download Manager"
+    $Global:ResultadosList.Add((Install-AppViaDirectUrl "AB Download Manager" "amir1376/ab-download-manager" "Setup" "/S")); Save-IncrementalReport
+
+    # App 5: WinRAR
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "WinRAR x64"
+    $Global:ResultadosList.Add((Install-AppViaWinget "WinRAR x64" "RARLab.WinRAR" "/S")); Save-IncrementalReport
+
+    # App 6: VLC
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "VLC Media Player"
+    $Global:ResultadosList.Add((Install-AppViaWinget "VLC Media Player" "VideoLAN.VLC" "/S")); Save-IncrementalReport
+
+    # App 7: Chrome
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Google Chrome"
+    $Global:ResultadosList.Add((Install-AppViaWinget "Google Chrome" "Google.Chrome" "/silent /install")); Save-IncrementalReport
+
+    # App 8: Firefox
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mozilla Firefox"
+    $Global:ResultadosList.Add((Install-AppViaWinget "Mozilla Firefox" "Mozilla.Firefox" "-ms")); Save-IncrementalReport
+
+    # App 9: Mullvad Browser
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mullvad Browser"
+    $Global:ResultadosList.Add((Install-AppViaWinget "Mullvad Browser" "MullvadVPN.MullvadBrowser" "/S")); Save-IncrementalReport
+
+    # App 10: Microsoft Edge
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Microsoft Edge"
+    $Global:ResultadosList.Add((Install-AppViaWinget "Microsoft Edge" "Microsoft.Edge" "/silent")); Save-IncrementalReport
+
+    # App 11: FlyPhotos
+    $JWADPasoActual++
+    Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "FlyPhotos"
+    $Global:ResultadosList.Add((Install-AppViaDirectUrl "FlyPhotos" "riyasy/FlyPhotos" "Setup")); Save-IncrementalReport
+
+    # TELEMETRIA Y HARDWARE
+    Write-Host "`n=========================================================" -ForegroundColor Cyan
+    Write-Host " RECOPILANDO TELEMETRIA Y ESPECIFICACIONES DEL SISTEMA" -ForegroundColor Cyan
+    Write-Host "=========================================================" -ForegroundColor Cyan
+
+    $ComputerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+    $OperatingSystem = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+    $ProcessorInfo = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue
+
+    $Global:Fabricante = $ComputerSystem.Manufacturer
+    $Global:Modelo = $ComputerSystem.Model
+    $Global:Procesador = $ProcessorInfo.Name
+
+    $RAMTotalBytes = $ComputerSystem.TotalPhysicalMemory
+    if (-not $RAMTotalBytes) { $RAMTotalBytes = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum }
+    $Global:RAMTotalGB = [Math]::Round($RAMTotalBytes / 1GB, 2)
+    
+    $RAMLibreKB = $OperatingSystem.FreePhysicalMemory
+    $RAMTotalKB = $OperatingSystem.TotalVisibleMemorySize
+    $RAMUsadaKB = $RAMTotalKB - $RAMLibreKB
+    $Global:RAMUsoPct = [Math]::Round(($RAMUsadaKB / $RAMTotalKB) * 100, 2)
+
+    $DiscoC = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction SilentlyContinue
+    $Global:DiscoTotalGB = [Math]::Round($DiscoC.Size / 1GB, 2)
+    $DiscoLibreGB = [Math]::Round($DiscoC.FreeSpace / 1GB, 2)
+    $DiscoUsadoGB = $Global:DiscoTotalGB - $DiscoLibreGB
+    $Global:DiscoUsoPct = [Math]::Round(($DiscoUsadoGB / $Global:DiscoTotalGB) * 100, 2)
+
+    # Diagnostico Térmico Seguro
+    try {
+        $WmiZones = Get-CimInstance -Namespace "root/wmi" -ClassName "MSAcpi_ThermalZoneTemperature" -ErrorAction Stop
+        if ($WmiZones) {
+            $Global:TempFinal = [Math]::Round((($WmiZones.CurrentTemperature) - 2732) / 10, 2)
         }
+    } catch {
+        $Global:TempFinal = $null
     }
-} catch {
-    $NetSw.Stop()
-    Write-Host "[FALLO] No se pudo verificar .NET Framework: $_" -ForegroundColor Red
-    $NetResult = [PSCustomObject]@{
-        app_name = ".NET Framework"
-        estado   = "FAILED"
-        version_instalada = "N/A"
-        tiempo_instalacion_segundos = [Math]::Round($NetSw.Elapsed.TotalSeconds, 2)
-        error_mensaje = $_.Exception.Message
-    }
-}
 
-# Java Runtime Environment (JRE) x64
-# NOTA: Oracle discontinuo la distribucion publica de "Oracle.JRE" en el
-# repositorio de winget (por eso fallaba con "paquete no encontrado"). El
-# reemplazo libre y con soporte activo es Eclipse Temurin JRE (OpenJDK).
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Java Runtime Environment (JRE) x64"
-$JavaResult = Install-AppViaWinget -AppName "Java Runtime Environment" -WingetId "EclipseAdoptium.Temurin.21.JRE"
+} finally {
+    # 7. EXPORTACION FINAL Y CIERRE RESILIENTE
+    $TiempoTotalSw.Stop()
+    Save-IncrementalReport
 
-# 4. INSTALACION DE LAS 11 APLICACIONES PRINCIPALES
-Write-Host "`n=========================================================" -ForegroundColor Cyan
-Write-Host " INICIANDO IMPLEMENTACION DE LAS 11 APLICACIONES PRINCIPALES" -ForegroundColor Cyan
-Write-Host "=========================================================" -ForegroundColor Cyan
+    Write-Host "`n=========================================================" -ForegroundColor Green
+    Write-Host " REPORTE FINAL DE DESPLIEGUE Y TELEMETRIA" -ForegroundColor Green
+    Write-Host "=========================================================" -ForegroundColor Green
 
-$ResultadosList = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-# Agregar complementos de sistema a la lista de reportes
-$ResultadosList.Add($VCRedistResult)
-$ResultadosList.Add($NetResult)
-$ResultadosList.Add($JavaResult)
-
-# App 1: 7-Zip (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "7-Zip"
-$ResultadosList.Add((Install-AppViaWinget -AppName "7-Zip" -WingetId "7zip.7zip"))
-
-# App 2: Bulk Crap Uninstaller (Winget)
-# NOTA: el ID correcto en el repositorio de winget es "Klocman.BulkCrapUninstaller"
-# (el usado antes, "BCUninstaller.BulkCrapUninstaller", no existe y causaba el
-# error "paquete no encontrado"). El instalador es Inno Setup: los switches
-# silenciosos correctos son /VERYSILENT /SUPPRESSMSGBOXES /NORESTART.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Bulk Crap Uninstaller"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Bulk Crap Uninstaller" -WingetId "Klocman.BulkCrapUninstaller" -Arguments "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"))
-
-# App 3: SumatraPDF (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "SumatraPDF"
-$ResultadosList.Add((Install-AppViaWinget -AppName "SumatraPDF" -WingetId "SumatraPDF.SumatraPDF"))
-
-# App 4: AB Download Manager (GitHub - Descarga Directa)
-# NOTA: el instalador es NSIS; el switch silencioso correcto es /S (no /SILENT,
-# que no es reconocido por NSIS y provocaba el Exit Code 1).
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "AB Download Manager"
-$ResultadosList.Add((Install-AppViaDirectUrl -AppName "AB Download Manager" -Repo "amir1376/ab-download-manager" -AssetFilter "Setup" -Arguments "/S"))
-
-# App 5: WinRAR x64 (ES) (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "WinRAR x64"
-$ResultadosList.Add((Install-AppViaWinget -AppName "WinRAR x64" -WingetId "RARLab.WinRAR" -Arguments "/S"))
-
-# App 6: VLC Media Player (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "VLC Media Player"
-$ResultadosList.Add((Install-AppViaWinget -AppName "VLC Media Player" -WingetId "VideoLAN.VLC" -Arguments "/S"))
-
-# App 7: Google Chrome (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Google Chrome"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Google Chrome" -WingetId "Google.Chrome" -Arguments "/silent /install"))
-
-# App 8: Mozilla Firefox (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mozilla Firefox"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Mozilla Firefox" -WingetId "Mozilla.Firefox" -Arguments "-ms"))
-
-# App 9: Mullvad Browser (Winget)
-# NOTA: el ID correcto en el repositorio de winget es "MullvadVPN.MullvadBrowser"
-# (el usado antes, "Mullvad.MullvadBrowser", no existe y causaba el error
-# "paquete no encontrado"). El instalador es NSIS, switch silencioso /S.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Mullvad Browser"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Mullvad Browser" -WingetId "MullvadVPN.MullvadBrowser" -Arguments "/S"))
-
-# App 10: Microsoft Edge para Empresas (Winget)
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "Microsoft Edge"
-$ResultadosList.Add((Install-AppViaWinget -AppName "Microsoft Edge" -WingetId "Microsoft.Edge" -Arguments "/silent"))
-
-# App 11: FlyPhotos (GitHub - Descarga Directa)
-# NOTA: el instalador es MSI; no se envia -Arguments porque el switch previo
-# (/S) no es valido para msiexec y provocaba el Exit Code 1639. La funcion ya
-# aplica /qn /norestart de forma nativa para instaladores MSI.
-$JWADPasoActual++
-Show-JWADProgressBar -Current $JWADPasoActual -Total $JWADPasosTotal -Label "FlyPhotos"
-$ResultadosList.Add((Install-AppViaDirectUrl -AppName "FlyPhotos" -Repo "riyasy/FlyPhotos" -AssetFilter "Setup"))
-
-# 5. RECOPILACION DE TELEMETRIA DEL HARDWARE Y DEL SISTEMA
-Write-Host "`n=========================================================" -ForegroundColor Cyan
-Write-Host " RECOPILANDO TELEMETRIA Y ESPECIFICACIONES DEL SISTEMA" -ForegroundColor Cyan
-Write-Host "=========================================================" -ForegroundColor Cyan
-
-$ComputerSystem = Get-CimInstance Win32_ComputerSystem
-$OperatingSystem = Get-CimInstance Win32_OperatingSystem
-$ProcessorInfo = Get-CimInstance Win32_Processor
-
-$Fabricante = $ComputerSystem.Manufacturer
-$Modelo = $ComputerSystem.Model
-$Procesador = $ProcessorInfo.Name
-$Arquitectura = $env:PROCESSOR_ARCHITECTURE
-
-# RAM total y en uso
-$RAMTotalBytes = ($ComputerSystem.TotalPhysicalMemory)
-if (-not $RAMTotalBytes) {
-    $RAMTotalBytes = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum
-}
-$RAMTotalGB = [Math]::Round($RAMTotalBytes / 1GB, 2)
-$RAMLibreKB = $OperatingSystem.FreePhysicalMemory
-$RAMTotalKB = $OperatingSystem.TotalVisibleMemorySize
-$RAMUsadaKB = $RAMTotalKB - $RAMLibreKB
-$RAMUsoPct = [Math]::Round(($RAMUsadaKB / $RAMTotalKB) * 100, 2)
-
-# Almacenamiento total y en uso (C:)
-$DiscoC = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
-$DiscoTotalGB = [Math]::Round($DiscoC.Size / 1GB, 2)
-$DiscoLibreGB = [Math]::Round($DiscoC.FreeSpace / 1GB, 2)
-$DiscoUsadoGB = $DiscoTotalGB - $DiscoLibreGB
-$DiscoUsoPct = [Math]::Round(($DiscoUsadoGB / $DiscoTotalGB) * 100, 2)
-
-# Diagnosticos de Temperatura
-$LecturasTemp = [System.Collections.Generic.List[PSCustomObject]]::new()
-$TempFinal = $null
-
-# Metodo 1: CIM_ThermalZone
-try {
-    $CimZones = Get-CimInstance -Namespace "root/cimv2" -ClassName "Win32_TemperatureSensor" -ErrorAction Stop
-    if ($CimZones -and $CimZones.CurrentReading) {
-        $ValCelsius = $CimZones.CurrentReading
-        $LecturasTemp.Add([PSCustomObject]@{
-            metodo = "CIM_ThermalZone"
-            valor_celsius = $ValCelsius
-            estado = "SUCCESS"
-        })
-        $TempFinal = $ValCelsius
+    Write-Host "[-] Fecha y Hora: $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss')"
+    Write-Host "[-] Equipo: $Global:Fabricante $Global:Modelo"
+    Write-Host "[-] Procesador: $Global:Procesador"
+    Write-Host "[-] Memoria RAM: $Global:RAMTotalGB GB (En uso: $Global:RAMUsoPct %)"
+    Write-Host "[-] Disco (C:): $Global:DiscoTotalGB GB (En uso: $Global:DiscoUsoPct %)"
+    if ($null -ne $Global:TempFinal) {
+        Write-Host "[-] Temperatura CPU: $Global:TempFinal C" -ForegroundColor Yellow
     } else {
-        throw "Sin lecturas en Win32_TemperatureSensor"
+        Write-Host "[-] Temperatura CPU: No disponible (Hardware bloqueado)" -ForegroundColor Gray
     }
-} catch {
-    $LecturasTemp.Add([PSCustomObject]@{
-        metodo = "CIM_ThermalZone"
-        valor_celsius = $null
-        estado = "UNSUPPORTED"
-    })
-}
+    Write-Host "[-] Tiempo Total: $([Math]::Round($TiempoTotalSw.Elapsed.TotalSeconds, 2)) segundos" -ForegroundColor Cyan
+    Write-Host "[-] Reporte JSON Preservado en: $ReportePath" -ForegroundColor Green
 
-# Metodo 2: WMI_MSAcpi
-try {
-    $WmiZones = Get-CimInstance -Namespace "root/wmi" -ClassName "MSAcpi_ThermalZoneTemperature" -ErrorAction Stop
-    if ($WmiZones) {
-        # La lectura es en decimas de Kelvin (ej: 3002 = 300.2 Kelvin)
-        $ValCelsius = [Math]::Round((($WmiZones.CurrentTemperature) - 2732) / 10, 2)
-        $LecturasTemp.Add([PSCustomObject]@{
-            metodo = "WMI_MSAcpi"
-            valor_celsius = $ValCelsius
-            estado = "SUCCESS"
-        })
-        if ($null -eq $TempFinal) { $TempFinal = $ValCelsius }
-    } else {
-        throw "Sin lecturas en MSAcpi_ThermalZoneTemperature"
+    Write-Host "`n[-] Estado de las Instalaciones:" -ForegroundColor Gray
+    foreach ($App in $Global:ResultadosList) {
+        $Color = "Green"
+        if ($App.estado -eq "FAILED") { $Color = "Red" }
+        elseif ($App.estado -eq "DESACTUALIZADO") { $Color = "Yellow" }
+        Write-Host "    * [$($App.estado)] $($App.app_name) - Version: $($App.version_instalada) ($($App.tiempo_instalacion_segundos)s)" -ForegroundColor $Color
     }
-} catch {
-    $LecturasTemp.Add([PSCustomObject]@{
-        metodo = "WMI_MSAcpi"
-        valor_celsius = $null
-        estado = "HARDWARE_LOCKED"
-    })
+    Write-Host "`n=========================================================" -ForegroundColor Green
+    Write-Host " Proceso finalizado." -ForegroundColor Green
+    Write-Host "=========================================================" -ForegroundColor Green
+
+    $JWADBannerPequeno = @(
+        '    ___      ___   ___  ',
+        ' _ | \ \    / /_\ |   \ ',
+        '| || |\ \/\/ / _ \| |) |',
+        ' \__/  \_/\_/_/ \_\___/ '
+    )
+    Write-Host ""
+    foreach ($JWADLinea in $JWADBannerPequeno) { Write-Host "  $JWADLinea" -ForegroundColor DarkGray }
+    Write-Host "  javizcape.github.io/JWAD" -ForegroundColor DarkGray
+    Write-Host ""
 }
-
-# Detener el cronometro total
-$TiempoTotalSw.Stop()
-$TiempoTotalSegundos = [Math]::Round($TiempoTotalSw.Elapsed.TotalSeconds, 2)
-
-# 6. EXPORTAR REPORTE JSON
-$ReporteJSON = [Ordered]@{
-    timestamp = (Get-Date -Format "o")
-    specs_computador = [Ordered]@{
-        fabricante = $Fabricante
-        modelo     = $Modelo
-        procesador = $Procesador
-        arquitectura = $Arquitectura
-        memoria_ram_total_gb = $RAMTotalGB
-        uso_actual_ram_porcentaje = $RAMUsoPct
-        almacenamiento_total_gb = $DiscoTotalGB
-        uso_actual_almacenamiento_porcentaje = $DiscoUsoPct
-    }
-    diagnosticos_temperatura = [Ordered]@{
-        lecturas = $LecturasTemp
-        temperatura_final_corroborada = $TempFinal
-    }
-    reporte_instalacion = [Ordered]@{
-        tiempo_total_ejecucion_segundos = $TiempoTotalSegundos
-        resultado_aplicaciones = $ResultadosList
-    }
-}
-
-$ReporteJSON | ConvertTo-Json -Depth 5 | Out-File -FilePath $ReportePath -Encoding utf8 -Force
-
-# 7. VISUALIZACION DEL REPORTE FINAL EN CONSOLA
-Write-Host "`n=========================================================" -ForegroundColor Green
-Write-Host " REPORTE FINAL DE DESPLIEGUE Y TELEMETRIA" -ForegroundColor Green
-Write-Host "=========================================================" -ForegroundColor Green
-
-Write-Host "[-] Fecha y Hora: $(Get-Date -Format "dd/MM/yyyy HH:mm:ss")"
-Write-Host "[-] Equipo: $Fabricante $Modelo"
-Write-Host "[-] Procesador: $Procesador"
-Write-Host "[-] Memoria RAM: $RAMTotalGB GB (En uso: $RAMUsoPct %)"
-Write-Host "[-] Disco (C:): $DiscoTotalGB GB (En uso: $DiscoUsoPct %)"
-if ($null -ne $TempFinal) {
-    Write-Host "[-] Temperatura CPU: $TempFinal C" -ForegroundColor Yellow
-} else {
-    Write-Host "[-] Temperatura CPU: No disponible (Hardware bloqueado o no soportado)" -ForegroundColor Gray
-}
-Write-Host "[-] Tiempo Total de Ejecucion: $TiempoTotalSegundos segundos" -ForegroundColor Cyan
-Write-Host "[-] Archivo de Reporte Creado en: $ReportePath" -ForegroundColor Green
-
-Write-Host "`n[-] Estado de las Instalaciones:" -ForegroundColor Gray
-foreach ($App in $ResultadosList) {
-    $Color = "Green"
-    if ($App.estado -eq "FAILED") { $Color = "Red" }
-    elseif ($App.estado -eq "DESACTUALIZADO") { $Color = "Yellow" }
-    Write-Host "    * [$($App.estado)] $($App.app_name) - Version: $($App.version_instalada) ($($App.tiempo_instalacion_segundos)s)" -ForegroundColor $Color
-}
-Write-Host "`n=========================================================" -ForegroundColor Green
-Write-Host " Proceso de automatizacion finalizado con exito." -ForegroundColor Green
-Write-Host "=========================================================" -ForegroundColor Green
-
-#====================================================================
-# CAPA DE PRESENTACION (FRONTEND) - No altera logica de negocio.
-# Firma ASCII de cierre, version reducida del banner de apertura.
-#====================================================================
-$JWADBannerPequeno = @(
-    '    ___      ___   ___  ',
-    ' _ | \ \    / /_\ |   \ ',
-    '| || |\ \/\/ / _ \| |) |',
-    ' \__/  \_/\_/_/ \_\___/ '
-)
-
-Write-Host ""
-foreach ($JWADLinea in $JWADBannerPequeno) {
-    Write-Host "  $JWADLinea" -ForegroundColor DarkGray
-}
-Write-Host "  javizcape.github.io/JWAD" -ForegroundColor DarkGray
-Write-Host ""
