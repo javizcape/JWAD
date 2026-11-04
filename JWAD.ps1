@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 JWAD - Windows App Deployer
-Version: 3.2.1 (targeted fixes: registry detection, BCU/VLC resolvers, MSI diagnostics, download progress)
+Version: 3.2.2 (targeted corrections: BCU, Scoop inventory, FlyPhotos MSI, Edge Update, dynamic version checks)
 Compatibilidad objetivo: Windows 10/11 x64; Windows PowerShell 5.1 y PowerShell 7+
 
 IMPORTANTE:
@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 # -----------------------------------------------------------------------------
 # CONFIGURACION GLOBAL
 # -----------------------------------------------------------------------------
-$script:JWADVersion = '3.2.1'
+$script:JWADVersion = '3.2.2'
 $script:JWADStarted = [System.Diagnostics.Stopwatch]::StartNew()
 $script:JWADIsAdmin = $false
 $script:ScoopBootstrapAttempted = $false
@@ -36,6 +36,9 @@ $script:ScoopCommand = $null
 $script:InstallResults = New-Object 'System.Collections.Generic.List[object]'
 $script:LogDirectory = Join-Path $env:LOCALAPPDATA 'JWAD\Logs'
 $script:TempDirectory = Join-Path $env:TEMP 'JWAD'
+$script:PackageCacheDirectory = Join-Path $env:LOCALAPPDATA 'JWAD\Packages'
+$script:GitHubReleaseCache = @{}
+$script:JWAD_BCU_AlternateDownloadUrl = ''
 
 $desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
 if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop)) {
@@ -44,7 +47,7 @@ if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $des
 $script:ReportPath = Join-Path $desktop 'Reporte_Despliegue_JWAD.json'
 $script:LogPath = Join-Path $script:LogDirectory ('JWAD_{0}.log' -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
 
-foreach ($directory in @($script:LogDirectory, $script:TempDirectory)) {
+foreach ($directory in @($script:LogDirectory, $script:TempDirectory, $script:PackageCacheDirectory)) {
     if (-not (Test-Path -LiteralPath $directory)) {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
     }
@@ -110,6 +113,7 @@ function Get-JWADInstalledApplication {
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
         'HKCU:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
     )
+    $matchedEntries = New-Object 'System.Collections.Generic.List[object]'
     foreach ($root in $roots) {
         $entries = @(Get-ItemProperty -Path $root -ErrorAction SilentlyContinue)
         foreach ($entry in $entries) {
@@ -126,16 +130,63 @@ function Get-JWADInstalledApplication {
             $versionProperty = $entry.PSObject.Properties['DisplayVersion']
             $publisherProperty = $entry.PSObject.Properties['Publisher']
             $pathProperty = $entry.PSObject.Properties['PSPath']
+            $uninstallProperty = $entry.PSObject.Properties['UninstallString']
+            $quietUninstallProperty = $entry.PSObject.Properties['QuietUninstallString']
+            $installLocationProperty = $entry.PSObject.Properties['InstallLocation']
+            $displayIconProperty = $entry.PSObject.Properties['DisplayIcon']
+            $windowsInstallerProperty = $entry.PSObject.Properties['WindowsInstaller']
+            $childNameProperty = $entry.PSObject.Properties['PSChildName']
+            $productCode = ''
+            if ($null -ne $childNameProperty -and [string]$childNameProperty.Value -match '^\{[A-Fa-f0-9-]{36}\}$') {
+                $productCode = [string]$childNameProperty.Value
+            }
+            elseif ($null -ne $uninstallProperty) {
+                $productCodeMatch = [regex]::Match([string]$uninstallProperty.Value, '\{[A-Fa-f0-9-]{36}\}')
+                if ($productCodeMatch.Success) { $productCode = $productCodeMatch.Value }
+            }
 
-            return [PSCustomObject]@{
+            [void]$matchedEntries.Add([PSCustomObject]@{
                 DisplayName = $displayName
                 DisplayVersion = if ($null -ne $versionProperty) { [string]$versionProperty.Value } else { '' }
                 Publisher = if ($null -ne $publisherProperty) { [string]$publisherProperty.Value } else { '' }
                 RegistryKey = if ($null -ne $pathProperty) { [string]$pathProperty.Value } else { '' }
-            }
+                UninstallString = if ($null -ne $uninstallProperty) { [string]$uninstallProperty.Value } else { '' }
+                QuietUninstallString = if ($null -ne $quietUninstallProperty) { [string]$quietUninstallProperty.Value } else { '' }
+                InstallLocation = if ($null -ne $installLocationProperty) { [string]$installLocationProperty.Value } else { '' }
+                DisplayIcon = if ($null -ne $displayIconProperty) { [string]$displayIconProperty.Value } else { '' }
+                WindowsInstaller = if ($null -ne $windowsInstallerProperty) { [int]$windowsInstallerProperty.Value } else { 0 }
+                ProductCode = $productCode
+            })
         }
     }
-    return $null
+    if ($matchedEntries.Count -eq 0) { return $null }
+
+    # A machine can contain stale entries in both registry views and hives.
+    # Return the highest parseable installed version, not the first registry hit.
+    $ranked = @($matchedEntries | Sort-Object -Property @{
+        Expression = {
+            $comparable = ConvertTo-JWADComparableVersion ([string]$_.DisplayVersion)
+            if ($null -ne $comparable) { $comparable } else { [version]'0.0' }
+        }
+        Descending = $true
+    })
+    if ($ranked.Count -gt 0) { return $ranked[0] }
+    return $matchedEntries[0]
+}
+
+function ConvertTo-JWADComparableVersion {
+    [CmdletBinding()]
+    param([AllowNull()][string]$VersionText)
+
+    if ([string]::IsNullOrWhiteSpace($VersionText)) { return $null }
+    $match = [regex]::Match($VersionText, '(?<!\d)(\d+(?:\.\d+){1,3})(?!\d)')
+    if (-not $match.Success) { return $null }
+    try {
+        $parts = @($match.Groups[1].Value.Split('.'))
+        while ($parts.Count -lt 4) { $parts += '0' }
+        return [version]($parts -join '.')
+    }
+    catch { return $null }
 }
 
 function Get-JWADVCRuntimeInfo {
@@ -327,7 +378,7 @@ function Get-JWADWingetInstalledPackage {
     # Require the exact package ID as a whitespace-delimited table token; do not
     # infer installation from an error message that merely echoes the query.
     $idPattern = '(?<![A-Za-z0-9_.-])' + [regex]::Escape($WingetId) + '(?![A-Za-z0-9_.-])'
-    foreach ($line in ($output -split '[`r`n]+')) {
+    foreach ($line in ($output -split '[\r\n]+')) {
         if ($line -match $idPattern) {
             $displayVersion = 'N/A'
             $idIndex = $line.IndexOf($WingetId, [StringComparison]::OrdinalIgnoreCase)
@@ -426,8 +477,88 @@ function Invoke-JWADWingetInstall {
 function Get-JWADScoopCommand {
     [CmdletBinding()]
     param()
-    $cmd = Get-Command -Name 'scoop' -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($cmd) { return $cmd }
+    $commands = @(Get-Command -Name 'scoop' -All -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandType -in @('Application', 'ExternalScript')
+    })
+    if ($commands.Count -eq 0) { return $null }
+    # Prefer a native shim where available; otherwise use the installed script.
+    $native = $commands | Where-Object { $_.CommandType -eq 'Application' } | Select-Object -First 1
+    if ($native) { return $native }
+    return ($commands | Select-Object -First 1)
+}
+
+function Get-JWADScoopInstalledPackage {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$ScoopName)
+
+    $safeName = [regex]::Escape($ScoopName)
+    $scoopCommand = Get-JWADScoopCommand
+    $policy = Get-ExecutionPolicy
+    $canInvokeScoop = ($null -ne $scoopCommand) -and ($policy.ToString() -notin @('Restricted', 'AllSigned'))
+
+    if ($canInvokeScoop) {
+        try {
+            $listOutput = Invoke-JWADScoopCommand -Arguments @('list')
+            foreach ($line in ($listOutput -split '[\r\n]+')) {
+                if ($line -match ('(?i)^\s*' + $safeName + '\s+(?<version>[^\s]+)')) {
+                    return [PSCustomObject]@{
+                        Installed = $true; Name = $ScoopName; Version = [string]$Matches['version']
+                        Source = 'scoop list'; Root = ''; Path = ''; CommandAvailable = $true
+                    }
+                }
+            }
+        }
+        catch {
+            # Continue with filesystem inspection. It works when scoop.ps1 is
+            # blocked by policy or its shim cannot run, without bypassing policy.
+        }
+    }
+
+    $roots = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($candidate in @(
+        $env:SCOOP,
+        $env:SCOOP_GLOBAL,
+        (Join-Path $env:USERPROFILE 'scoop'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\scoop'),
+        (Join-Path $env:ProgramData 'scoop'),
+        (Join-Path $env:ProgramFiles 'Scoop'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Scoop')
+    )) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+            $normalized = [Environment]::ExpandEnvironmentVariables([string]$candidate).TrimEnd('\')
+            if (-not $roots.Contains($normalized)) { $roots.Add($normalized) }
+        }
+    }
+
+    foreach ($root in $roots) {
+        $appRoot = Join-Path (Join-Path $root 'apps') $ScoopName
+        if (-not (Test-Path -LiteralPath $appRoot -PathType Container)) { continue }
+        $currentPath = Join-Path $appRoot 'current'
+        if (-not (Test-Path -LiteralPath $currentPath)) { continue }
+
+        $version = 'N/A'
+        $manifestPath = Join-Path $currentPath 'manifest.json'
+        if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+            try {
+                $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                if ($null -ne $manifest.version) { $version = [string]$manifest.version }
+            }
+            catch { }
+        }
+        if ($version -eq 'N/A') {
+            try {
+                $resolved = (Resolve-Path -LiteralPath $currentPath -ErrorAction Stop).Path
+                $leaf = Split-Path -Leaf $resolved
+                if (-not [string]::IsNullOrWhiteSpace($leaf) -and $leaf -ne 'current') { $version = $leaf }
+            }
+            catch { }
+        }
+        return [PSCustomObject]@{
+            Installed = $true; Name = $ScoopName; Version = $version
+            Source = 'Scoop apps directory'; Root = $root; Path = $currentPath
+            CommandAvailable = ($null -ne $scoopCommand)
+        }
+    }
     return $null
 }
 
@@ -511,6 +642,31 @@ function Install-JWADScoopBootstrap {
     $script:ScoopBootstrapSucceeded = $true
 }
 
+function Get-JWADRemoteScoopManifestVersion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ScoopName,
+        [ValidateSet('main', 'extras', 'java')][string]$Bucket = 'main'
+    )
+
+    $repository = switch ($Bucket) {
+        'main'   { 'ScoopInstaller/Main' }
+        'extras' { 'ScoopInstaller/Extras' }
+        'java'   { 'ScoopInstaller/Java' }
+    }
+    $manifestUrl = 'https://raw.githubusercontent.com/{0}/master/bucket/{1}.json' -f $repository, [Uri]::EscapeDataString($ScoopName)
+    $request = @{ Uri = $manifestUrl; TimeoutSec = 45; ErrorAction = 'Stop' }
+    $manifest = Invoke-RestMethod @request
+    if ($null -eq $manifest.version -or [string]::IsNullOrWhiteSpace([string]$manifest.version)) {
+        throw ('Official Scoop manifest {0} does not expose a version field.' -f $manifestUrl)
+    }
+    return [PSCustomObject]@{
+        Version = [string]$manifest.version
+        Url = $manifestUrl
+        Repository = $repository
+    }
+}
+
 function Invoke-JWADScoopInstall {
     [CmdletBinding()]
     param(
@@ -518,7 +674,100 @@ function Invoke-JWADScoopInstall {
         [ValidateSet('main', 'extras', 'java')][string]$Bucket = 'main'
     )
 
-    Install-JWADScoopBootstrap
+    $package = if ($Bucket -eq 'main') { $ScoopName } else { '{0}/{1}' -f $Bucket, $ScoopName }
+    $existing = Get-JWADScoopInstalledPackage -ScoopName $ScoopName
+    $policy = Get-ExecutionPolicy
+
+    if ($existing -and $policy.ToString() -in @('Restricted', 'AllSigned')) {
+        try {
+            $remoteManifest = Get-JWADRemoteScoopManifestVersion -ScoopName $ScoopName -Bucket $Bucket
+            $installedVersion = ConvertTo-JWADComparableVersion ([string]$existing.Version)
+            $latestVersion = ConvertTo-JWADComparableVersion ([string]$remoteManifest.Version)
+            if ($installedVersion -and $latestVersion -and $installedVersion -ge $latestVersion) {
+                return [PSCustomObject]@{
+                    Success = $true; Status = 'UP_TO_DATE'; ExitCode = 0
+                    Version = [string]$existing.Version
+                    Detail = ('Existing Scoop package {0} version {1} is equal to or newer than official manifest version {2}. Scoop execution was not needed; ExecutionPolicy={3}. Source: {4}' -f $ScoopName, $existing.Version, $remoteManifest.Version, $policy, $remoteManifest.Url)
+                }
+            }
+            return [PSCustomObject]@{
+                Success = $true; Status = 'UPDATE_BLOCKED'; ExitCode = 0
+                Version = [string]$existing.Version
+                Detail = ('Scoop package {0} version {1} is older than official manifest {2}, but ExecutionPolicy={3} blocks Scoop execution. No duplicate direct installer was run. Source: {4}' -f $ScoopName, $existing.Version, $remoteManifest.Version, $policy, $remoteManifest.Url)
+            }
+        }
+        catch {
+            return [PSCustomObject]@{
+                Success = $true; Status = 'PRESENT_UPDATE_UNKNOWN'; ExitCode = 0
+                Version = [string]$existing.Version
+                Detail = ('Scoop package {0} version {1} is installed at {2}; ExecutionPolicy={3} blocks Scoop execution and the official manifest could not be queried: {4}. No duplicate direct installation was attempted.' -f $ScoopName, $existing.Version, $existing.Path, $policy, $_.Exception.Message)
+            }
+        }
+    }
+
+    if (-not (Get-JWADScoopCommand)) {
+        Install-JWADScoopBootstrap
+    }
+
+    if ($existing) {
+        try {
+            $beforeVersion = [string]$existing.Version
+            $updateOutput = Invoke-JWADScoopCommand -Arguments @('update', $package)
+            $after = Get-JWADScoopInstalledPackage -ScoopName $ScoopName
+            if (-not $after) {
+                throw ('Scoop update completed but installed package {0} could not be confirmed.' -f $package)
+            }
+            $afterVersion = [string]$after.Version
+            $beforeComparable = ConvertTo-JWADComparableVersion $beforeVersion
+            $afterComparable = ConvertTo-JWADComparableVersion $afterVersion
+            if ($beforeComparable -and $afterComparable -and $afterComparable -lt $beforeComparable) {
+                throw ('Scoop package version regressed from {0} to {1}; no success will be reported.' -f $beforeVersion, $afterVersion)
+            }
+            $status = 'PRESENT_UPDATE_UNKNOWN'
+            if ($beforeComparable -and $afterComparable -and $afterComparable -eq $beforeComparable) {
+                $status = 'UP_TO_DATE'
+            }
+            elseif ($beforeComparable -and $afterComparable -and $afterComparable -gt $beforeComparable) {
+                $status = 'INSTALLED'
+            }
+            elseif ($updateOutput -match '(?i)already up.to.date|no updates|up to date') {
+                $status = 'UP_TO_DATE'
+            }
+            return [PSCustomObject]@{
+                Success = $true; Status = $status; ExitCode = 0; Version = $afterVersion
+                Detail = ('Scoop package {0}; before={1}; after={2}. {3}' -f $package, $beforeVersion, $afterVersion, $updateOutput)
+            }
+        }
+        catch {
+            # A failed Scoop update must not trigger a second distribution over
+            # an existing portable copy. Query the manifest independently.
+            $scoopUpdateError = $_.Exception.Message
+            try {
+                $remoteManifest = Get-JWADRemoteScoopManifestVersion -ScoopName $ScoopName -Bucket $Bucket
+                $installedVersion = ConvertTo-JWADComparableVersion ([string]$existing.Version)
+                $latestVersion = ConvertTo-JWADComparableVersion ([string]$remoteManifest.Version)
+                if ($installedVersion -and $latestVersion -and $installedVersion -ge $latestVersion) {
+                    return [PSCustomObject]@{
+                        Success = $true; Status = 'UP_TO_DATE'; ExitCode = 0
+                        Version = [string]$existing.Version
+                        Detail = ('Existing Scoop package {0} version {1} is equal to or newer than official manifest version {2}; Scoop command failed ({3}). Source: {4}' -f $ScoopName, $existing.Version, $remoteManifest.Version, $scoopUpdateError, $remoteManifest.Url)
+                    }
+                }
+                return [PSCustomObject]@{
+                    Success = $true; Status = 'UPDATE_BLOCKED'; ExitCode = 0
+                    Version = [string]$existing.Version
+                    Detail = ('Scoop package {0} version {1}; latest official manifest {2}. Update could not run: {3}. No direct installer was run over the existing Scoop-managed copy. Source: {4}' -f $ScoopName, $existing.Version, $remoteManifest.Version, $scoopUpdateError, $remoteManifest.Url)
+                }
+            }
+            catch {
+                return [PSCustomObject]@{
+                    Success = $true; Status = 'PRESENT_UPDATE_UNKNOWN'; ExitCode = 0
+                    Version = [string]$existing.Version
+                    Detail = ('Scoop package {0} version {1} is installed, but update verification failed: {2}; official manifest lookup also failed: {3}. No direct installer was run over the existing Scoop-managed copy.' -f $ScoopName, $existing.Version, $scoopUpdateError, $_.Exception.Message)
+                }
+            }
+        }
+    }
 
     $bucketList = Invoke-JWADScoopCommand -Arguments @('bucket', 'list')
     $bucketExists = [regex]::IsMatch($bucketList, ('(?im)^\s*{0}\s+' -f [regex]::Escape($Bucket)))
@@ -533,16 +782,23 @@ function Invoke-JWADScoopInstall {
         }
         if (-not [string]::IsNullOrWhiteSpace($bucketUrl)) {
             if (-not $bucketUrl.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
-                throw ('JWAD_SCOOP_{0}_URL debe utilizar HTTPS.' -f $Bucket.ToUpperInvariant())
+                throw ('JWAD_SCOOP_{0}_URL must use HTTPS.' -f $Bucket.ToUpperInvariant())
             }
             $bucketArgs += $bucketUrl
         }
         [void](Invoke-JWADScoopCommand -Arguments $bucketArgs)
     }
 
-    $package = if ($Bucket -eq 'main') { $ScoopName } else { '{0}/{1}' -f $Bucket, $ScoopName }
     [void](Invoke-JWADScoopCommand -Arguments @('install', $package))
-    return [PSCustomObject]@{ Success = $true; Status = 'INSTALLED'; ExitCode = 0; Detail = ('Scoop instalo {0}.' -f $package) }
+    $installed = Get-JWADScoopInstalledPackage -ScoopName $ScoopName
+    if (-not $installed) {
+        throw ('Scoop install returned without confirming package {0} in scoop list or its app directory.' -f $package)
+    }
+    return [PSCustomObject]@{
+        Success = $true; Status = 'INSTALLED'; ExitCode = 0
+        Version = [string]$installed.Version
+        Detail = ('Scoop installed {0}; version={1}.' -f $package, $installed.Version)
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -593,11 +849,16 @@ function Get-JWADGitHubRelease {
         throw 'JWAD_GITHUB_API_BASE debe utilizar HTTPS.'
     }
 
+    $cacheKey = $Repository.ToLowerInvariant()
+    if ($script:GitHubReleaseCache.ContainsKey($cacheKey)) {
+        return $script:GitHubReleaseCache[$cacheKey]
+    }
+
     $uri = '{0}/repos/{1}/releases/latest' -f $apiBase, $Repository
     $headers = @{
         Accept = 'application/vnd.github+json'
         'X-GitHub-Api-Version' = '2026-03-10'
-        'User-Agent' = 'JWAD-Windows-App-Deployer/3.1.0'
+        'User-Agent' = 'JWAD-Windows-App-Deployer/3.2.2'
     }
     $token = $env:JWAD_GITHUB_TOKEN
     if ([string]::IsNullOrWhiteSpace($token)) { $token = $env:GH_TOKEN }
@@ -610,7 +871,9 @@ function Get-JWADGitHubRelease {
             $requestParams = @{ Uri = $uri; Headers = $headers; TimeoutSec = 45; ErrorAction = 'Stop' }
             if ($PSVersionTable.PSVersion.Major -eq 5) { $requestParams.UseBasicParsing = $true }
             $response = Invoke-WebRequest @requestParams
-            return ($response.Content | ConvertFrom-Json -ErrorAction Stop)
+            $releaseData = $response.Content | ConvertFrom-Json -ErrorAction Stop
+            $script:GitHubReleaseCache[$cacheKey] = $releaseData
+            return $releaseData
         }
         catch {
             $status = Get-JWADHttpStatusCode -Exception $_.Exception
@@ -673,6 +936,90 @@ function Get-JWADDirectDownloadUrl {
     return $OriginalUrl
 }
 
+function Get-JWADFlyPhotosInstalledState {
+    [CmdletBinding()]
+    param()
+
+    $storePackages = @()
+    try {
+        $storePackages = @(Get-AppxPackage -AllUsers -ErrorAction Stop | Where-Object {
+            ([string]$_.Name -match '(?i)Fly\s*Photos|FlyPhotos') -or
+            ([string]$_.PackageFamilyName -match '(?i)Fly\s*Photos|FlyPhotos')
+        })
+    }
+    catch {
+        try {
+            $storePackages = @(Get-AppxPackage -ErrorAction Stop | Where-Object {
+                ([string]$_.Name -match '(?i)Fly\s*Photos|FlyPhotos') -or
+                ([string]$_.PackageFamilyName -match '(?i)Fly\s*Photos|FlyPhotos')
+            })
+        }
+        catch { $storePackages = @() }
+    }
+    if ($storePackages.Count -gt 0) {
+        $storePackage = $storePackages | Sort-Object { ConvertTo-JWADComparableVersion ([string]$_.Version) } -Descending | Select-Object -First 1
+        return [PSCustomObject]@{
+            Installed = $true
+            Kind = 'Store'
+            Version = [string]$storePackage.Version
+            DisplayName = [string]$storePackage.Name
+            InstallLocation = [string]$storePackage.InstallLocation
+        }
+    }
+
+    $registry = Get-JWADInstalledApplication -DisplayNamePattern '(?i)^Fly\s*Photos(?:$|\s)|^FlyPhotos(?:$|\s)'
+    if (-not $registry) {
+        $knownPaths = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($basePath in @(${env:ProgramFiles}, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)) {
+            if ([string]::IsNullOrWhiteSpace([string]$basePath)) { continue }
+            foreach ($relativePath in @('Fly Photos\FlyPhotos.exe', 'FlyPhotos\FlyPhotos.exe', 'Programs\Fly Photos\FlyPhotos.exe', 'FlyPhotos\FlyPhotos.exe')) {
+                $candidatePath = Join-Path $basePath $relativePath
+                if (-not $knownPaths.Contains($candidatePath)) { $knownPaths.Add($candidatePath) }
+            }
+        }
+        foreach ($knownPath in $knownPaths) {
+            if (Test-Path -LiteralPath $knownPath) {
+                $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($knownPath)
+                return [PSCustomObject]@{
+                    Installed = $true
+                    Kind = 'MSI/EXE'
+                    Version = [string]$info.ProductVersion
+                    DisplayName = 'Fly Photos'
+                    InstallLocation = Split-Path -Parent $knownPath
+                }
+            }
+        }
+        return $null
+    }
+
+    $version = [string]$registry.DisplayVersion
+    $candidatePaths = New-Object 'System.Collections.Generic.List[string]'
+    if (-not [string]::IsNullOrWhiteSpace($registry.InstallLocation)) {
+        $candidatePaths.Add((Join-Path $registry.InstallLocation 'FlyPhotos.exe'))
+        $candidatePaths.Add((Join-Path $registry.InstallLocation 'Fly Photos.exe'))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($registry.DisplayIcon)) {
+        $iconPath = $registry.DisplayIcon.Trim().Trim('"')
+        $iconPath = [regex]::Replace($iconPath, ',\s*-?\d+\s*$', '')
+        if (Test-Path -LiteralPath $iconPath -PathType Leaf) { $candidatePaths.Add($iconPath) }
+    }
+    foreach ($path in ($candidatePaths | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $fileInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+            if (-not [string]::IsNullOrWhiteSpace($fileInfo.ProductVersion)) { $version = [string]$fileInfo.ProductVersion; break }
+            if (-not [string]::IsNullOrWhiteSpace($fileInfo.FileVersion)) { $version = [string]$fileInfo.FileVersion; break }
+        }
+    }
+    return [PSCustomObject]@{
+        Installed = $true
+        Kind = 'MSI/EXE'
+        Version = $version
+        DisplayName = $registry.DisplayName
+        InstallLocation = $registry.InstallLocation
+        ProductCode = $registry.ProductCode
+    }
+}
+
 function Get-JWADEdgeEnterpriseAsset {
     [CmdletBinding()]
     param()
@@ -707,6 +1054,194 @@ function Get-JWADEdgeEnterpriseAsset {
     }
 }
 
+
+function Get-JWADEdgeInstalledInfo {
+    [CmdletBinding()]
+    param()
+
+    $programFilesX86 = ${env:ProgramFiles(x86)}
+    if ([string]::IsNullOrWhiteSpace($programFilesX86)) { $programFilesX86 = Join-Path $env:SystemDrive 'Program Files (x86)' }
+    $candidatePaths = @(
+        (Join-Path $programFilesX86 'Microsoft\Edge\Application\msedge.exe'),
+        (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe')
+    )
+    $appPathKeys = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe'
+    )
+    foreach ($keyPath in $appPathKeys) {
+        try {
+            $key = Get-Item -LiteralPath $keyPath -ErrorAction Stop
+            $value = [string]$key.GetValue('')
+            if (-not [string]::IsNullOrWhiteSpace($value)) { $candidatePaths += $value }
+        }
+        catch { }
+    }
+
+    $registryVersion = ''
+    $versionKeys = @(
+        'HKLM:\SOFTWARE\Microsoft\Edge\BLBeacon',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Edge\BLBeacon',
+        'HKCU:\SOFTWARE\Microsoft\Edge\BLBeacon',
+        'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}'
+    )
+    foreach ($keyPath in $versionKeys) {
+        try {
+            $key = Get-ItemProperty -LiteralPath $keyPath -ErrorAction Stop
+            foreach ($propertyName in @('version', 'pv', 'ProductVersion')) {
+                $property = $key.PSObject.Properties[$propertyName]
+                if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+                    $registryVersion = [string]$property.Value
+                    break
+                }
+            }
+            if ($registryVersion) { break }
+        }
+        catch { }
+    }
+
+    foreach ($path in ($candidatePaths | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $fileInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+            $version = [string]$fileInfo.ProductVersion
+            if ([string]::IsNullOrWhiteSpace($version)) { $version = [string]$fileInfo.FileVersion }
+            if ([string]::IsNullOrWhiteSpace($version)) { $version = $registryVersion }
+            if ([string]::IsNullOrWhiteSpace($version)) { $version = 'UNKNOWN' }
+            return [PSCustomObject]@{ Installed = $true; Version = $version; Executable = $path }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($registryVersion)) {
+        return [PSCustomObject]@{ Installed = $true; Version = $registryVersion; Executable = '' }
+    }
+    return $null
+}
+
+function Get-JWADEdgeUpdateExecutable {
+    [CmdletBinding()]
+    param()
+
+    $programFilesX86 = ${env:ProgramFiles(x86)}
+    $paths = @(
+        (Join-Path $programFilesX86 'Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe'),
+        (Join-Path $env:ProgramFiles 'Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\EdgeUpdate\MicrosoftEdgeUpdate.exe')
+    )
+    foreach ($path in $paths) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) { return $path }
+    }
+    return $null
+}
+
+function Invoke-JWADEdgeUpdate {
+    [CmdletBinding()]
+    param()
+
+    $installed = Get-JWADEdgeInstalledInfo
+    if (-not $installed) { return $null }
+
+    try {
+        $latest = Get-JWADEdgeEnterpriseAsset
+    }
+    catch {
+        return [PSCustomObject]@{
+            Success = $true; Status = 'PRESENT_UPDATE_UNKNOWN'; ExitCode = 0; Version = $installed.Version
+            Detail = ('Existing Microsoft Edge {0} detected, but Microsoft Edge Update API could not be queried: {1}' -f $installed.Version, $_.Exception.Message)
+        }
+    }
+    $currentVersion = ConvertTo-JWADComparableVersion $installed.Version
+    $latestVersion = ConvertTo-JWADComparableVersion $latest.Version
+    if ($null -eq $latestVersion) { throw ('Microsoft Edge API returned an invalid version: {0}' -f $latest.Version) }
+    if ($currentVersion -and $currentVersion -ge $latestVersion) {
+        return [PSCustomObject]@{
+            Success = $true; Status = 'UP_TO_DATE'; ExitCode = 0; Version = $installed.Version
+            Detail = ('Existing Microsoft Edge {0} is equal to or newer than the current Stable x64 release {1}.' -f $installed.Version, $latest.Version)
+        }
+    }
+
+    # Do not override enterprise channel/version/update policies. The Microsoft
+    # command below performs a manual update and does not honor target overrides.
+    $policyPaths = @(
+        'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate',
+        'HKLM:\SOFTWARE\WOW6432Node\Policies\Microsoft\EdgeUpdate',
+        'HKCU:\SOFTWARE\Policies\Microsoft\EdgeUpdate'
+    )
+    $stableGuid = '{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}'
+    foreach ($policyPath in $policyPaths) {
+        $policy = Get-ItemProperty -LiteralPath $policyPath -ErrorAction SilentlyContinue
+        if (-not $policy) { continue }
+        $targetProperty = $policy.PSObject.Properties['TargetVersionPrefix' + $stableGuid]
+        if ($null -ne $targetProperty -and -not [string]::IsNullOrWhiteSpace([string]$targetProperty.Value)) {
+            return [PSCustomObject]@{
+                Success = $true; Status = 'POLICY_MANAGED'; ExitCode = 0; Version = $installed.Version
+                Detail = ('Existing Edge {0} is governed by TargetVersionPrefix={1} in {2}; JWAD will not override the policy.' -f $installed.Version, $targetProperty.Value, $policyPath)
+            }
+        }
+        $channelProperty = $policy.PSObject.Properties['TargetChannel' + $stableGuid]
+        if ($null -ne $channelProperty -and -not [string]::IsNullOrWhiteSpace([string]$channelProperty.Value) -and [string]$channelProperty.Value -notmatch '^(?i:stable)$') {
+            return [PSCustomObject]@{
+                Success = $true; Status = 'POLICY_MANAGED'; ExitCode = 0; Version = $installed.Version
+                Detail = ('Existing Edge {0} follows TargetChannel={1} in {2}; JWAD will not switch update channels.' -f $installed.Version, $channelProperty.Value, $policyPath)
+            }
+        }
+        $updateProperty = $policy.PSObject.Properties['Update' + $stableGuid]
+        if ($null -eq $updateProperty) { $updateProperty = $policy.PSObject.Properties['UpdateDefault'] }
+        if ($null -ne $updateProperty) {
+            $updateValue = -1
+            if ([int]::TryParse([string]$updateProperty.Value, [ref]$updateValue) -and $updateValue -in @(0, 3)) {
+                return [PSCustomObject]@{
+                    Success = $true; Status = 'POLICY_MANAGED'; ExitCode = 0; Version = $installed.Version
+                    Detail = ('Existing Edge {0} is governed by Update policy value {1} in {2} (updates disabled or automatic-silent-only); JWAD will not override it.' -f $installed.Version, $updateValue, $policyPath)
+                }
+            }
+        }
+    }
+
+    $updater = Get-JWADEdgeUpdateExecutable
+    if (-not $updater) {
+        return [PSCustomObject]@{
+            Success = $true; Status = 'UPDATE_BLOCKED'; ExitCode = 0; Version = $installed.Version
+            Detail = ('Microsoft Edge {0} is older than current Stable x64 {1}, but MicrosoftEdgeUpdate.exe was not found. JWAD will not repeat the enterprise MSI path that failed with MSI 1722.' -f $installed.Version, $latest.Version)
+        }
+    }
+
+    $appGuid = '56EB18F8-B008-4CBD-B6D2-8C97FE7E9062'
+    $arguments = '/silent /install appguid={' + $appGuid + '}&appname=Microsoft%20Edge&needsadmin=True'
+    $processResult = Invoke-JWADProcess -FilePath $updater -ArgumentList $arguments -TimeoutSeconds 900
+    if ($processResult.ExitCode -notin @(0, 3010, 1641)) {
+        throw ('Microsoft Edge Update returned ExitCode={0}. {1}' -f $processResult.ExitCode, $processResult.Error)
+    }
+
+    $edgeWaitSeconds = 300
+    $edgeWaitOverride = 0
+    if ([int]::TryParse([string]$env:JWAD_EDGE_UPDATE_WAIT_SECONDS, [ref]$edgeWaitOverride) -and $edgeWaitOverride -ge 60 -and $edgeWaitOverride -le 900) {
+        $edgeWaitSeconds = $edgeWaitOverride
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds($edgeWaitSeconds)
+    $after = $null
+    do {
+        Start-Sleep -Seconds 3
+        $after = Get-JWADEdgeInstalledInfo
+        $afterVersion = if ($after) { ConvertTo-JWADComparableVersion $after.Version } else { $null }
+        if ($afterVersion -and $afterVersion -ge $latestVersion) { break }
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if (-not $after) { throw 'Microsoft Edge Update ended, but msedge.exe could not be detected afterward.' }
+    $afterVersion = ConvertTo-JWADComparableVersion $after.Version
+    if ($afterVersion -and $afterVersion -ge $latestVersion) {
+        return [PSCustomObject]@{
+            Success = $true
+            Status = if ($processResult.ExitCode -in @(3010, 1641)) { 'INSTALLED_REBOOT_REQUIRED' } else { 'INSTALLED' }
+            ExitCode = $processResult.ExitCode
+            Version = $after.Version
+            Detail = ('Microsoft Edge updated through the official Microsoft Edge Update client: {0} -> {1}.' -f $installed.Version, $after.Version)
+        }
+    }
+    throw ('Microsoft Edge Update completed (ExitCode={0}), but the installed version remained {1}; target Stable x64 version is {2}.' -f $processResult.ExitCode, $after.Version, $latest.Version)
+}
+
 function Invoke-JWADDirectInstall {
     [CmdletBinding()]
     param(
@@ -729,6 +1264,7 @@ function Invoke-JWADDirectInstall {
     $assetName = ''
     $expectedHash = $ExpectedSHA256
     $pageText = ''
+    if ($AppName -eq 'Bulk Crap Uninstaller') { $script:JWAD_BCU_AlternateDownloadUrl = '' }
 
     if (-not [string]::IsNullOrWhiteSpace($DirectJsonUrl)) {
         if ($DirectJsonUrl -eq 'https://edgeupdates.microsoft.com/api/products?view=enterprise') {
@@ -792,6 +1328,32 @@ function Invoke-JWADDirectInstall {
         $pageResponse = Invoke-WebRequest @pageParams
         $pageText = [string]$pageResponse.Content
         $baseUri = [Uri]$DirectPageUrl
+        if ($AppName -eq 'Bulk Crap Uninstaller') {
+            # SourceForge latest/download page is the canonical dynamic endpoint.
+            # It publishes the current exact filename and matching SHA-256 together.
+            $bcuNameMatch = [regex]::Match($pageText, '(?i)BCUninstaller_(?<version>\d+(?:\.\d+){1,3})_setup\.exe')
+            if (-not $bcuNameMatch.Success) {
+                throw 'SourceForge latest/download did not expose a current BCUninstaller setup filename.'
+            }
+            $assetName = $bcuNameMatch.Value
+            $version = $bcuNameMatch.Groups['version'].Value
+            $assetHashPattern = '(?is)' + [regex]::Escape($assetName) + '.{0,2500}?SHA-256.{0,1000}?(?<hash>[A-Fa-f0-9]{64})'
+            $bcuHashMatch = [regex]::Match($pageText, $assetHashPattern)
+            if (-not $bcuHashMatch.Success) {
+                $allHashes = [regex]::Matches($pageText, '(?is)SHA-256.{0,1000}?([A-Fa-f0-9]{64})')
+                if ($allHashes.Count -eq 1) { $expectedHash = $allHashes[0].Groups[1].Value.ToUpperInvariant() }
+                else { throw ('SourceForge latest/download did not expose one unambiguous SHA-256 digest for {0}.' -f $assetName) }
+            }
+            else { $expectedHash = $bcuHashMatch.Groups['hash'].Value.ToUpperInvariant() }
+            $versionParts = @($version.Split('.'))
+            if ($versionParts.Count -lt 2) { throw ('SourceForge returned an invalid BCU version: {0}' -f $version) }
+            $folderVersion = 'v{0}.{1}' -f $versionParts[0], $versionParts[1]
+            # Start with SourceForge's dynamic latest/download redirect. A
+            # versioned canonical path is added as a second verified candidate.
+            $downloadUrl = $DirectPageUrl
+            $script:JWAD_BCU_AlternateDownloadUrl = 'https://downloads.sourceforge.net/project/bulk-crap-uninstaller/{0}/{1}' -f $folderVersion, [Uri]::EscapeDataString($assetName)
+        }
+        else {
         $candidatePageText = $pageText
         if ($AppName -eq 'WinRAR x64') {
             # Exclude beta builds and localized download tables: parse only the
@@ -888,6 +1450,7 @@ function Invoke-JWADDirectInstall {
                 if ($fileVersionMatch.Success) { $version = $fileVersionMatch.Groups[1].Value }
             }
         }
+        }
     }
     elseif (-not [string]::IsNullOrWhiteSpace($DirectUrl)) {
         $downloadUrl = $DirectUrl
@@ -905,6 +1468,12 @@ function Invoke-JWADDirectInstall {
     }
 
     $downloadUrl = Get-JWADDirectDownloadUrl -OriginalUrl $downloadUrl
+    $downloadCandidates = New-Object 'System.Collections.Generic.List[string]'
+    $downloadCandidates.Add($downloadUrl)
+    if ($AppName -eq 'Bulk Crap Uninstaller' -and -not [string]::IsNullOrWhiteSpace($script:JWAD_BCU_AlternateDownloadUrl)) {
+        if (-not $downloadCandidates.Contains($script:JWAD_BCU_AlternateDownloadUrl)) { $downloadCandidates.Add($script:JWAD_BCU_AlternateDownloadUrl) }
+        $script:JWAD_BCU_AlternateDownloadUrl = ''
+    }
     $extension = [IO.Path]::GetExtension($assetName).ToLowerInvariant()
     if ($extension -notin @('.exe', '.msi')) {
         throw ('Unsupported direct asset type: {0}. Only explicit EXE/MSI installers are accepted.' -f $extension)
@@ -921,7 +1490,19 @@ function Invoke-JWADDirectInstall {
         if ($hashMatch.Success) { $expectedHash = $hashMatch.Value }
     }
 
-    $downloadPath = Join-Path $script:TempDirectory ([Guid]::NewGuid().ToString('N') + $extension)
+    $retainDownload = ($AppName -eq 'FlyPhotos' -and $extension -eq '.msi')
+    if ($retainDownload) {
+        $safeAppFolder = [regex]::Replace($AppName, '[^A-Za-z0-9_-]', '_')
+        $safeVersionFolder = [regex]::Replace($version, '[^A-Za-z0-9_.-]', '_')
+        if ([string]::IsNullOrWhiteSpace($safeVersionFolder)) { $safeVersionFolder = 'latest' }
+        $packageFolder = Join-Path $script:PackageCacheDirectory (Join-Path $safeAppFolder $safeVersionFolder)
+        if (-not (Test-Path -LiteralPath $packageFolder)) { New-Item -ItemType Directory -Path $packageFolder -Force | Out-Null }
+        $downloadPath = Join-Path $packageFolder ([IO.Path]::GetFileName($assetName))
+    }
+    else {
+        $downloadPath = Join-Path $script:TempDirectory ([Guid]::NewGuid().ToString('N') + $extension)
+    }
+    $keepCachedFile = $false
     try {
         $downloadTimeoutSeconds = 240
         if ($AppName -eq 'Google Chrome') { $downloadTimeoutSeconds = 900 }
@@ -930,41 +1511,90 @@ function Invoke-JWADDirectInstall {
             $downloadTimeoutSeconds = $timeoutOverride
         }
 
-        $downloadParams = @{ Uri = $downloadUrl; OutFile = $downloadPath; TimeoutSec = $downloadTimeoutSeconds; ErrorAction = 'Stop' }
-        if ($PSVersionTable.PSVersion.Major -eq 5) { $downloadParams.UseBasicParsing = $true }
-
-        # Invoke-WebRequest progress rendering is expensive for large files in
-        # Windows PowerShell 5.1. Suppress it only during transfer and restore
-        # the caller's preference immediately afterward.
-        $previousProgressPreference = $ProgressPreference
-        try {
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest @downloadParams
-        }
-        finally {
-            $ProgressPreference = $previousProgressPreference
+        $cachedFileValid = $false
+        if ($retainDownload -and (Test-Path -LiteralPath $downloadPath -PathType Leaf) -and -not [string]::IsNullOrWhiteSpace($expectedHash)) {
+            $cachedHash = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash
+            if ($cachedHash -eq $expectedHash.ToUpperInvariant()) { $cachedFileValid = $true }
+            else { Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue }
         }
 
-        if (-not (Test-Path -LiteralPath $downloadPath) -or (Get-Item -LiteralPath $downloadPath).Length -le 0) {
-            throw 'The download did not produce a non-empty file.'
-        }
+        if (-not $cachedFileValid) {
+            $downloadedAndVerified = $false
+            $candidateErrors = New-Object 'System.Collections.Generic.List[string]'
+            foreach ($candidateUrl in $downloadCandidates) {
+                if (-not $candidateUrl.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+                    $candidateErrors.Add(('Rejected non-HTTPS URL: {0}' -f $candidateUrl))
+                    continue
+                }
+                if (Test-Path -LiteralPath $downloadPath) { Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue }
+                try {
+                    $downloadParams = @{ Uri = $candidateUrl; OutFile = $downloadPath; TimeoutSec = $downloadTimeoutSeconds; ErrorAction = 'Stop' }
+                    if ($PSVersionTable.PSVersion.Major -eq 5) { $downloadParams.UseBasicParsing = $true }
+                    $previousProgressPreference = $ProgressPreference
+                    try {
+                        $ProgressPreference = 'SilentlyContinue'
+                        Invoke-WebRequest @downloadParams
+                    }
+                    finally { $ProgressPreference = $previousProgressPreference }
 
-        if (-not [string]::IsNullOrWhiteSpace($expectedHash)) {
-            if ($expectedHash -notmatch '^[A-Fa-f0-9]{64}$') { throw 'The expected SHA-256 value has an invalid format.' }
-            $actualHash = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash
-            if ($actualHash -ne $expectedHash.ToUpperInvariant()) {
-                throw 'The downloaded SHA-256 does not match the official digest.'
+                    if (-not (Test-Path -LiteralPath $downloadPath) -or (Get-Item -LiteralPath $downloadPath).Length -le 0) {
+                        throw 'The download did not produce a non-empty file.'
+                    }
+                    if ($expectedHash -notmatch '^[A-Fa-f0-9]{64}$' -and [string]::IsNullOrWhiteSpace($ExpectedSigner)) {
+                        throw 'SIN INFORMACION: no trusted SHA-256 digest or expected Authenticode signer is configured. Download rejected.'
+                    }
+                    if (-not [string]::IsNullOrWhiteSpace($expectedHash)) {
+                        $actualHash = (Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash
+                        if ($actualHash -ne $expectedHash.ToUpperInvariant()) {
+                            throw ('SHA-256 mismatch. Expected={0}; actual={1}.' -f $expectedHash.ToUpperInvariant(), $actualHash)
+                        }
+                    }
+                    elseif (-not [string]::IsNullOrWhiteSpace($ExpectedSigner)) {
+                        $signature = Get-AuthenticodeSignature -FilePath $downloadPath
+                        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike ('*{0}*' -f $ExpectedSigner)) {
+                            throw 'Authenticode signature is invalid or the signer does not match ExpectedSigner.'
+                        }
+                    }
+                    $downloadedAndVerified = $true
+                    break
+                }
+                catch {
+                    $candidateErrors.Add(('{0}: {1}' -f $candidateUrl, $_.Exception.Message))
+                    if (Test-Path -LiteralPath $downloadPath) { Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue }
+                }
             }
-        }
-        elseif (-not [string]::IsNullOrWhiteSpace($ExpectedSigner)) {
-            $signature = Get-AuthenticodeSignature -FilePath $downloadPath
-            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike ('*{0}*' -f $ExpectedSigner)) {
-                throw 'Authenticode signature is invalid or the signer does not match ExpectedSigner.'
+            if (-not $downloadedAndVerified) {
+                throw ('No official download candidate passed integrity validation. {0}' -f (($candidateErrors.ToArray()) -join ' || '))
             }
         }
         else {
-            throw 'SIN INFORMACION: no trusted SHA-256 digest or expected Authenticode signer is configured. Download rejected.'
+            # Cached MSI has already passed the expected SHA-256 check above.
         }
+
+        # Reject an HTML/interstitial response saved with an installer extension.
+        $fileStream = [IO.File]::OpenRead($downloadPath)
+        try {
+            $signatureBytes = New-Object byte[] 8
+            $bytesRead = $fileStream.Read($signatureBytes, 0, 8)
+        }
+        finally { $fileStream.Dispose() }
+        if ($extension -eq '.exe') {
+            if ($bytesRead -lt 2 -or $signatureBytes[0] -ne 0x4D -or $signatureBytes[1] -ne 0x5A) {
+                throw ('Downloaded file {0} does not have a valid PE MZ header; it may be an HTML/interstitial response.' -f $assetName)
+            }
+        }
+        elseif ($extension -eq '.msi') {
+            $oleHeader = [byte[]](0xD0,0xCF,0x11,0xE0,0xA1,0xB1,0x1A,0xE1)
+            $headerValid = ($bytesRead -ge 8)
+            for ($headerIndex = 0; $headerIndex -lt 8 -and $headerValid; $headerIndex++) {
+                if ($signatureBytes[$headerIndex] -ne $oleHeader[$headerIndex]) { $headerValid = $false }
+            }
+            if (-not $headerValid) {
+                throw ('Downloaded file {0} does not have the expected Windows Installer OLE header.' -f $assetName)
+            }
+        }
+
+        if ($retainDownload) { $keepCachedFile = $true }
 
         if ([string]::IsNullOrWhiteSpace($version) -or $version -eq 'N/A') {
             try {
@@ -975,6 +1605,7 @@ function Invoke-JWADDirectInstall {
             catch { }
         }
 
+        $targetReleaseVersion = [string]$version
         $msiLogPath = ''
         if ($extension -eq '.msi') {
             $safeAppLogName = [regex]::Replace($AppName, '[^A-Za-z0-9_-]', '_')
@@ -992,6 +1623,27 @@ function Invoke-JWADDirectInstall {
                 throw 'SIN INFORMACION: no verified silent arguments are configured for this EXE installer.'
             }
             $proc = Invoke-JWADProcess -FilePath $downloadPath -ArgumentList $Arguments
+        }
+
+        if ($AppName -eq 'FlyPhotos' -and $proc.ExitCode -in @(0, 3010, 1641)) {
+            $flyInstalled = $null
+            $verifyDeadline = [DateTime]::UtcNow.AddSeconds(45)
+            do {
+                Start-Sleep -Seconds 3
+                $flyInstalled = Get-JWADFlyPhotosInstalledState
+                if ($flyInstalled) { break }
+            } while ([DateTime]::UtcNow -lt $verifyDeadline)
+            if (-not $flyInstalled) {
+                throw ('FlyPhotos MSI returned ExitCode={0}, but the application was not found in AppX, Uninstall registry entries, or known executable locations. MSI log: {1}' -f $proc.ExitCode, $msiLogPath)
+            }
+            $installedComparable = ConvertTo-JWADComparableVersion ([string]$flyInstalled.Version)
+            $releaseComparable = ConvertTo-JWADComparableVersion $targetReleaseVersion
+            if ($installedComparable -and $releaseComparable -and $installedComparable -lt $releaseComparable) {
+                throw ('FlyPhotos installer returned ExitCode={0}, but detected installed version {1}, below release {2}. MSI log: {3}' -f $proc.ExitCode, $flyInstalled.Version, $targetReleaseVersion, $msiLogPath)
+            }
+            if (-not [string]::IsNullOrWhiteSpace([string]$flyInstalled.Version)) {
+                $version = [string]$flyInstalled.Version
+            }
         }
 
         if ($proc.ExitCode -eq 0) {
@@ -1022,10 +1674,13 @@ function Invoke-JWADDirectInstall {
             $installerOutput = ('{0} MSI log: {1}' -f $installerOutput, $msiLogPath).Trim()
         }
         if ($installerOutput.Length -gt 4000) { $installerOutput = $installerOutput.Substring(0, 4000) }
+        if ($AppName -eq 'FlyPhotos' -and $installerOutput -match '(?i)SECREPAIR|SECUREREPAIR|1316') {
+            throw ('FlyPhotos MSI source verification failed (1316/SECREPAIR). The verified MSI was retained at {0}. Check Windows Installer source-cache integrity, access to the retained MSI, and residual installer registration; no automatic registry cleanup was attempted. {1}' -f $downloadPath, $installerOutput)
+        }
         throw ('The direct installer returned ExitCode={0}. {1}' -f $proc.ExitCode, $installerOutput)
     }
     finally {
-        if (Test-Path -LiteralPath $downloadPath) {
+        if ((-not $keepCachedFile) -and (Test-Path -LiteralPath $downloadPath)) {
             Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
         }
     }
@@ -1063,13 +1718,91 @@ function Install-UniversalApp {
     $finalVersion = 'N/A'
     $finalError = $null
 
+    # FlyPhotos has no verified Winget/Scoop manifest in this catalog. Compare
+    # its installed version with the current stable GitHub release before MSI.
+    if ($AppName -eq 'FlyPhotos') {
+        $osBuild = [Environment]::OSVersion.Version.Build
+        if ($osBuild -lt 17763) {
+            $attempts.Add((New-JWADAttempt -Method 'Compatibility' -Outcome 'NOT_SUPPORTED' -Message ('FlyPhotos requires Windows 10 build 17763 or later; detected build {0}.' -f $osBuild)))
+            $finalStatus = 'NOT_SUPPORTED'
+            $finalMethod = 'Compatibility'
+        }
+        else {
+            $flyInstalled = Get-JWADFlyPhotosInstalledState
+            if ($flyInstalled) {
+                try {
+                    $latestFlyRelease = Get-JWADGitHubRelease -Repository 'riyasy/FlyPhotos' -MaxRetries $GitHubMaxRetries
+                    $latestFlyVersion = ConvertTo-JWADComparableVersion ([string]$latestFlyRelease.tag_name)
+                    $installedFlyVersion = ConvertTo-JWADComparableVersion ([string]$flyInstalled.Version)
+                    if ($null -eq $latestFlyVersion) { throw ('FlyPhotos latest release tag is not a parseable version: {0}' -f $latestFlyRelease.tag_name) }
+                    if ($flyInstalled.Kind -eq 'Store') {
+                        if ($installedFlyVersion -and $installedFlyVersion -ge $latestFlyVersion) {
+                            $attempts.Add((New-JWADAttempt -Method 'Detection' -Outcome 'SUCCESS' -Message ('FlyPhotos Store {0} is equal to or newer than latest stable GitHub MSI release {1}; Store package is not replaced.' -f $flyInstalled.Version, $latestFlyRelease.tag_name)))
+                            $finalStatus = 'UP_TO_DATE'
+                        }
+                        else {
+                            $attempts.Add((New-JWADAttempt -Method 'Detection' -Outcome 'STORE_MANAGED' -Message ('The Microsoft Store edition is installed at {0}; JWAD will not replace it with the distinct GitHub MSI edition. Version comparison is not conclusive or Store release differs; updates remain Store-managed.' -f $flyInstalled.Version)))
+                            $finalStatus = 'STORE_MANAGED'
+                        }
+                        $finalMethod = 'Store'
+                        $finalVersion = [string]$flyInstalled.Version
+                    }
+                    elseif ($null -eq $installedFlyVersion) {
+                        $attempts.Add((New-JWADAttempt -Method 'Detection' -Outcome 'VERSION_UNKNOWN' -Message 'FlyPhotos is present but its installed version could not be read. To avoid reinstalling over an existing MSI, JWAD will preserve it and report the update state as unknown.'))
+                        $finalStatus = 'PRESENT_UPDATE_UNKNOWN'
+                        $finalMethod = 'Detection'
+                        $finalVersion = [string]$flyInstalled.Version
+                    }
+                    elseif ($installedFlyVersion -ge $latestFlyVersion) {
+                        $attempts.Add((New-JWADAttempt -Method 'Detection' -Outcome 'SUCCESS' -Message ('FlyPhotos {0} is equal to or newer than latest stable release {1}.' -f $flyInstalled.Version, $latestFlyRelease.tag_name)))
+                        $finalStatus = 'UP_TO_DATE'
+                        $finalMethod = 'Detection'
+                        $finalVersion = [string]$flyInstalled.Version
+                    }
+                    else {
+                        $attempts.Add((New-JWADAttempt -Method 'Detection' -Outcome 'UPDATE_REQUIRED' -Message ('Installed FlyPhotos {0}; latest stable release is {1}. The WiX-based MSI from v2.6.0+ supports in-place upgrade.' -f $flyInstalled.Version, $latestFlyRelease.tag_name)))
+                    }
+                }
+                catch {
+                    $attempts.Add((New-JWADAttempt -Method 'Detection' -Outcome 'UPDATE_CHECK_FAILED' -Message $_.Exception.Message))
+                    $finalStatus = 'PRESENT_UPDATE_UNKNOWN'
+                    $finalMethod = 'Detection'
+                    $finalVersion = [string]$flyInstalled.Version
+                    $finalError = $_.Exception.Message
+                }
+            }
+            else {
+                $attempts.Add((New-JWADAttempt -Method 'Detection' -Outcome 'NOT_INSTALLED' -Message 'No FlyPhotos Store package, uninstall registry entry, or known executable was detected.'))
+            }
+        }
+    }
+
     # Nivel 1: Winget
     if (-not [string]::IsNullOrWhiteSpace($WingetId)) {
         try {
             $r = Invoke-JWADWingetInstall -WingetId $WingetId -CustomArguments $WingetCustomArgs -DetectPattern $DetectPattern
+            $effectiveMethod = 'Winget'
             $attempts.Add((New-JWADAttempt -Method 'Winget' -Outcome 'SUCCESS' -Message $r.Detail -ExitCode $r.ExitCode))
+
+            # WinGet can report no applicable package update while its source
+            # metadata is older than the vendor's current Edge Stable release.
+            # For an existing Edge already classified as current by WinGet,
+            # independently verify against Microsoft's live x64 Stable API and
+            # invoke the documented Edge Update client only when needed.
+            if ($AppName -eq 'Microsoft Edge' -and $r.Status -in @('UP_TO_DATE', 'ALREADY_PRESENT')) {
+                $edgeInstalledBeforeCheck = Get-JWADEdgeInstalledInfo
+                if ($edgeInstalledBeforeCheck) {
+                    $edgeValidation = Invoke-JWADEdgeUpdate
+                    if ($null -ne $edgeValidation) {
+                        $attempts.Add((New-JWADAttempt -Method 'EdgeUpdate' -Outcome ([string]$edgeValidation.Status) -Message ([string]$edgeValidation.Detail) -ExitCode $edgeValidation.ExitCode))
+                        $r = $edgeValidation
+                        if ($edgeValidation.Status -ne 'UP_TO_DATE') { $effectiveMethod = 'EdgeUpdate' }
+                    }
+                }
+            }
+
             $finalStatus = $r.Status
-            $finalMethod = 'Winget'
+            $finalMethod = $effectiveMethod
             if ($r.PSObject.Properties['Version'] -and -not [string]::IsNullOrWhiteSpace([string]$r.Version)) { $finalVersion = [string]$r.Version }
             $finalError = $null
         }
@@ -1088,9 +1821,15 @@ function Install-UniversalApp {
         if (-not [string]::IsNullOrWhiteSpace($ScoopName)) {
             try {
                 $r = Invoke-JWADScoopInstall -ScoopName $ScoopName -Bucket $ScoopBucket
-                $attempts.Add((New-JWADAttempt -Method 'Scoop' -Outcome 'SUCCESS' -Message $r.Detail -ExitCode $r.ExitCode))
+                $scoopOutcome = if ($r.Status -eq 'PRESENT_UPDATE_UNKNOWN') { 'UPDATE_UNKNOWN' } else { [string]$r.Status }
+                $attempts.Add((New-JWADAttempt -Method 'Scoop' -Outcome $scoopOutcome -Message $r.Detail -ExitCode $r.ExitCode))
                 $finalStatus = $r.Status
                 $finalMethod = 'Scoop'
+                # Scoop reports the package version even for portable installs
+                # that do not create a Windows Uninstall registry entry.
+                if ($r.PSObject.Properties['Version'] -and -not [string]::IsNullOrWhiteSpace([string]$r.Version)) {
+                    $finalVersion = [string]$r.Version
+                }
                 $detectedScoop = Get-JWADInstalledApplication -DisplayNamePattern $DetectPattern
                 if ($detectedScoop -and -not [string]::IsNullOrWhiteSpace($detectedScoop.DisplayVersion)) { $finalVersion = $detectedScoop.DisplayVersion }
                 $finalError = $null
@@ -1116,10 +1855,17 @@ function Install-UniversalApp {
             -not [string]::IsNullOrWhiteSpace($DirectPageUrl) -or
             -not [string]::IsNullOrWhiteSpace($DirectJsonUrl)) {
             try {
-                $r = Invoke-JWADDirectInstall -AppName $AppName -Repository $GitHubRepo -AssetRegex $RegexAsset -Arguments $DirectArguments -ExpectedSHA256 $ExpectedSHA256 -DirectUrl $DirectUrl -DirectFileName $DirectFileName -ExpectedSigner $ExpectedSigner -DirectPageUrl $DirectPageUrl -DirectAssetRegex $DirectAssetRegex -DirectHashSuffix $DirectHashSuffix -DirectJsonUrl $DirectJsonUrl
-                $attempts.Add((New-JWADAttempt -Method 'Direct' -Outcome 'SUCCESS' -Message $r.Detail -ExitCode $r.ExitCode))
+                if ($AppName -eq 'Microsoft Edge' -and (Get-JWADEdgeInstalledInfo)) {
+                    $r = Invoke-JWADEdgeUpdate
+                    $directMethodName = 'EdgeUpdate'
+                }
+                else {
+                    $r = Invoke-JWADDirectInstall -AppName $AppName -Repository $GitHubRepo -AssetRegex $RegexAsset -Arguments $DirectArguments -ExpectedSHA256 $ExpectedSHA256 -DirectUrl $DirectUrl -DirectFileName $DirectFileName -ExpectedSigner $ExpectedSigner -DirectPageUrl $DirectPageUrl -DirectAssetRegex $DirectAssetRegex -DirectHashSuffix $DirectHashSuffix -DirectJsonUrl $DirectJsonUrl
+                    $directMethodName = 'Direct'
+                }
+                $attempts.Add((New-JWADAttempt -Method $directMethodName -Outcome 'SUCCESS' -Message $r.Detail -ExitCode $r.ExitCode))
                 $finalStatus = $r.Status
-                $finalMethod = 'Direct'
+                $finalMethod = $directMethodName
                 $finalVersion = $r.Version
                 $finalError = $null
             }
@@ -1144,9 +1890,9 @@ function Install-UniversalApp {
 
     # FAILED es un estado de instalacion, no un nivel de presentacion.
     # Write-JWADMessage solo admite INFO, OK, WARN, ERROR y TITLE.
-    $statusLabel = if ($finalStatus -in @('INSTALLED', 'INSTALLED_REBOOT_REQUIRED', 'INSTALLED_ALREADY_PRESENT', 'UP_TO_DATE', 'ALREADY_PRESENT')) { 'OK' } else { 'ERROR' }
+    $statusLabel = if ($finalStatus -in @('INSTALLED', 'INSTALLED_REBOOT_REQUIRED', 'INSTALLED_ALREADY_PRESENT', 'UP_TO_DATE', 'ALREADY_PRESENT')) { 'OK' } elseif ($finalStatus -in @('PRESENT_UPDATE_UNKNOWN', 'STORE_MANAGED', 'NOT_SUPPORTED', 'UPDATE_BLOCKED', 'POLICY_MANAGED')) { 'WARN' } else { 'ERROR' }
     $statusMessage = '{0}: {1} mediante {2}' -f $AppName, $finalStatus, $finalMethod
-    if ($finalStatus -eq 'FAILED') {
+    if ($finalStatus -in @('FAILED', 'PRESENT_UPDATE_UNKNOWN', 'UPDATE_BLOCKED', 'POLICY_MANAGED', 'STORE_MANAGED', 'NOT_SUPPORTED')) {
         $attemptDetails = @($attempts | ForEach-Object {
             '{0}={1}: {2}' -f $_.metodo, $_.resultado, $_.detalle
         }) -join ' || '
@@ -1350,7 +2096,7 @@ $apps = @(
         Name = 'Bulk Crap Uninstaller'; WingetId = 'Klocman.BulkCrapUninstaller'; WingetCustomArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
         ScoopName = 'bulk-crap-uninstaller'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
         ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
-        DetectPattern = '(?i)^Bulk Crap Uninstaller'; DirectPageUrl = 'https://sourceforge.net/projects/bulk-crap-uninstaller/files/'; DirectAssetRegex = '(?i)BCUninstaller_[0-9.]+_setup\.exe'; DirectHashSuffix = ''; DirectJsonUrl = ''
+        DetectPattern = '(?i)^(Bulk Crap Uninstaller|BCUninstaller)(?:$|\s)'; DirectPageUrl = 'https://sourceforge.net/projects/bulk-crap-uninstaller/files/latest/download'; DirectAssetRegex = '(?i)BCUninstaller_[0-9.]+_setup\.exe'; DirectHashSuffix = ''; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
         Name = 'SumatraPDF'; WingetId = 'SumatraPDF.SumatraPDF'; WingetCustomArgs = '';
@@ -1404,7 +2150,7 @@ $apps = @(
         Name = 'FlyPhotos'; WingetId = ''; WingetCustomArgs = '';
         ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = 'riyasy/FlyPhotos'; RegexAsset = '(?i)^(?!.*(arm64|aarch64|arm)).*(x64|win64|amd64).*\.msi$'; DirectArguments = '';
         ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
-        DetectPattern = '(?i)^FlyPhotos'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
+        DetectPattern = '(?i)^Fly\s*Photos(?:$|\s)|^FlyPhotos(?:$|\s)'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
     }
 )
 
@@ -1446,7 +2192,7 @@ else {
 
 $script:JWADStarted.Stop()
 $failed = @($script:InstallResults | Where-Object { $_.estado -eq 'FAILED' }).Count
-$validationPending = @($script:InstallResults | Where-Object { $_.estado -in @('OUTDATED', 'UNKNOWN') }).Count
+$validationPending = @($script:InstallResults | Where-Object { $_.estado -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'UPDATE_BLOCKED', 'POLICY_MANAGED', 'STORE_MANAGED') }).Count
 $report = [ordered]@{
     version_script = $script:JWADVersion
     timestamp = (Get-Date -Format 'o')
@@ -1460,7 +2206,7 @@ $report = [ordered]@{
         total_registros = $script:InstallResults.Count
         instalaciones_fallidas = $failed
         validaciones_pendientes = $validationPending
-        instalaciones_exitosas = @($script:InstallResults | Where-Object { $_.estado -like 'INSTALLED*' -or $_.estado -in @('UP_TO_DATE', 'ALREADY_PRESENT') -or $_.estado -eq 'VALIDATED' }).Count
+        instalaciones_exitosas = @($script:InstallResults | Where-Object { $_.estado -like 'INSTALLED*' -or $_.estado -in @('UP_TO_DATE', 'ALREADY_PRESENT', 'STORE_MANAGED', 'POLICY_MANAGED') -or $_.estado -eq 'VALIDATED' }).Count
     }
     specs_computador = $telemetry.specs_computador
     diagnosticos_temperatura = $telemetry.diagnosticos_temperatura
@@ -1497,7 +2243,7 @@ Write-Host '============================================================' -Foreg
 foreach ($item in $script:InstallResults) {
     $color = 'Green'
     if ($item.estado -eq 'FAILED') { $color = 'Red' }
-    elseif ($item.estado -in @('OUTDATED', 'UNKNOWN')) { $color = 'Yellow' }
+    elseif ($item.estado -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'STORE_MANAGED', 'NOT_SUPPORTED', 'UPDATE_BLOCKED', 'POLICY_MANAGED')) { $color = 'Yellow' }
     elseif ($item.estado -in @('UP_TO_DATE', 'ALREADY_PRESENT', 'INSTALLED_ALREADY_PRESENT')) { $color = 'Green' }
     Write-Host ('[{0}] {1} | metodo={2} | version={3} | {4}s' -f $item.estado, $item.app_name, $item.metodo_instalacion, $item.version_instalada, $item.tiempo_instalacion_segundos) -ForegroundColor $color
 }
