@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 JWAD - Windows App Deployer
-Version: 3.0 (arquitectura de fallback Winget -> Scoop -> Direct)
+Version: 3.0.1 (corrección de nivel de log y diagnóstico final)
 Compatibilidad objetivo: Windows 10/11 x64; Windows PowerShell 5.1 y PowerShell 7+
 
 IMPORTANTE:
@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 # -----------------------------------------------------------------------------
 # CONFIGURACION GLOBAL
 # -----------------------------------------------------------------------------
-$script:JWADVersion = '3.0'
+$script:JWADVersion = '3.0.1'
 $script:JWADStarted = [System.Diagnostics.Stopwatch]::StartNew()
 $script:JWADIsAdmin = $false
 $script:ScoopBootstrapAttempted = $false
@@ -431,7 +431,7 @@ function Get-JWADGitHubRelease {
     $headers = @{
         Accept = 'application/vnd.github+json'
         'X-GitHub-Api-Version' = '2026-03-10'
-        'User-Agent' = 'JWAD-Windows-App-Deployer/3.0'
+        'User-Agent' = 'JWAD-Windows-App-Deployer/3.0.1'
     }
     $token = $env:JWAD_GITHUB_TOKEN
     if ([string]::IsNullOrWhiteSpace($token)) { $token = $env:GH_TOKEN }
@@ -715,8 +715,14 @@ function Install-UniversalApp {
     $result = New-JWADResult -Name $AppName -Status $finalStatus -Method $finalMethod -Version $finalVersion -Seconds $timer.Elapsed.TotalSeconds -Attempts $attempts.ToArray() -ErrorMessage $finalError
     $script:InstallResults.Add($result)
 
-    $statusLabel = if ($finalStatus -like 'INSTALLED*') { 'OK' } else { 'FAILED' }
-    Write-JWADMessage -Level $statusLabel -Message ('{0}: {1} mediante {2}' -f $AppName, $finalStatus, $finalMethod)
+    # FAILED es un estado de instalación, no un nivel de presentación.
+    # Write-JWADMessage solo admite INFO, OK, WARN, ERROR y TITLE.
+    $statusLabel = if ($finalStatus -like 'INSTALLED*') { 'OK' } else { 'ERROR' }
+    $statusMessage = '{0}: {1} mediante {2}' -f $AppName, $finalStatus, $finalMethod
+    if ($finalStatus -eq 'FAILED' -and -not [string]::IsNullOrWhiteSpace($finalError)) {
+        $statusMessage += ' | Detalle: ' + $finalError
+    }
+    Write-JWADMessage -Level $statusLabel -Message $statusMessage
     return $result
 }
 
