@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 JWAD - Windows App Deployer
-Version: 3.2.0 (accurate up-to-date states, resilient direct resolvers, ASCII console)
+Version: 3.2.1 (targeted fixes: registry detection, BCU/VLC resolvers, MSI diagnostics, download progress)
 Compatibilidad objetivo: Windows 10/11 x64; Windows PowerShell 5.1 y PowerShell 7+
 
 IMPORTANTE:
@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 # -----------------------------------------------------------------------------
 # CONFIGURACION GLOBAL
 # -----------------------------------------------------------------------------
-$script:JWADVersion = '3.2.0'
+$script:JWADVersion = '3.2.1'
 $script:JWADStarted = [System.Diagnostics.Stopwatch]::StartNew()
 $script:JWADIsAdmin = $false
 $script:ScoopBootstrapAttempted = $false
@@ -113,14 +113,25 @@ function Get-JWADInstalledApplication {
     foreach ($root in $roots) {
         $entries = @(Get-ItemProperty -Path $root -ErrorAction SilentlyContinue)
         foreach ($entry in $entries) {
-            $displayName = [string]$entry.DisplayName
-            if (-not [string]::IsNullOrWhiteSpace($displayName) -and $displayName -match $DisplayNamePattern) {
-                return [PSCustomObject]@{
-                    DisplayName = $displayName
-                    DisplayVersion = [string]$entry.DisplayVersion
-                    Publisher = [string]$entry.Publisher
-                    RegistryKey = [string]$entry.PSPath
-                }
+            # Uninstall keys do not all contain DisplayName. With StrictMode,
+            # reading a missing dynamic property throws and aborts detection.
+            $displayNameProperty = $entry.PSObject.Properties['DisplayName']
+            if ($null -eq $displayNameProperty) { continue }
+
+            $displayName = [string]$displayNameProperty.Value
+            if ([string]::IsNullOrWhiteSpace($displayName) -or $displayName -notmatch $DisplayNamePattern) {
+                continue
+            }
+
+            $versionProperty = $entry.PSObject.Properties['DisplayVersion']
+            $publisherProperty = $entry.PSObject.Properties['Publisher']
+            $pathProperty = $entry.PSObject.Properties['PSPath']
+
+            return [PSCustomObject]@{
+                DisplayName = $displayName
+                DisplayVersion = if ($null -ne $versionProperty) { [string]$versionProperty.Value } else { '' }
+                Publisher = if ($null -ne $publisherProperty) { [string]$publisherProperty.Value } else { '' }
+                RegistryKey = if ($null -ne $pathProperty) { [string]$pathProperty.Value } else { '' }
             }
         }
     }
@@ -838,13 +849,29 @@ function Invoke-JWADDirectInstall {
                 $safeAssetName = [Uri]::EscapeDataString($assetName)
                 $downloadUrl = 'https://downloads.sourceforge.net/project/bulk-crap-uninstaller/v{0}/{1}' -f $folderVersion.Value, $safeAssetName
                 $version = $bcuVersion
+
+                if ([string]::IsNullOrWhiteSpace($expectedHash)) {
+                    # SourceForge publishes the digest on the file-specific
+                    # metadata page. Tie the digest to this exact asset name.
+                    $bcuMetadataUrl = 'https://sourceforge.net/projects/bulk-crap-uninstaller/files/v{0}/{1}/download' -f $folderVersion.Value, $safeAssetName
+                    $bcuMetadataParams = @{ Uri = $bcuMetadataUrl; TimeoutSec = 60; ErrorAction = 'Stop' }
+                    if ($PSVersionTable.PSVersion.Major -eq 5) { $bcuMetadataParams.UseBasicParsing = $true }
+                    $bcuMetadataResponse = Invoke-WebRequest @bcuMetadataParams
+                    $bcuMetadataText = [string]$bcuMetadataResponse.Content
+                    $bcuHashPattern = '(?is)' + [regex]::Escape($assetName) + '.{0,1500}?SHA-256.{0,150}?([A-Fa-f0-9]{64})'
+                    $bcuHashMatch = [regex]::Match($bcuMetadataText, $bcuHashPattern)
+                    if (-not $bcuHashMatch.Success) {
+                        throw ('SourceForge did not publish a SHA-256 tied to the exact asset {0}.' -f $assetName)
+                    }
+                    $expectedHash = $bcuHashMatch.Groups[1].Value
+                }
             }
             else {
                 $downloadUrl = $DirectPageUrl
             }
         }
 
-        if ([string]::IsNullOrWhiteSpace($expectedHash)) {
+        if ([string]::IsNullOrWhiteSpace($expectedHash) -and $AppName -ne 'Bulk Crap Uninstaller') {
             $pageHash = [regex]::Match($pageText, '(?is)SHA-256.{0,300}?([A-Fa-f0-9]{64})')
             if ($pageHash.Success) { $expectedHash = $pageHash.Groups[1].Value }
         }
@@ -896,9 +923,27 @@ function Invoke-JWADDirectInstall {
 
     $downloadPath = Join-Path $script:TempDirectory ([Guid]::NewGuid().ToString('N') + $extension)
     try {
-        $downloadParams = @{ Uri = $downloadUrl; OutFile = $downloadPath; TimeoutSec = 240; ErrorAction = 'Stop' }
+        $downloadTimeoutSeconds = 240
+        if ($AppName -eq 'Google Chrome') { $downloadTimeoutSeconds = 900 }
+        $timeoutOverride = 0
+        if ([int]::TryParse([string]$env:JWAD_DOWNLOAD_TIMEOUT_SECONDS, [ref]$timeoutOverride) -and $timeoutOverride -ge 60 -and $timeoutOverride -le 3600) {
+            $downloadTimeoutSeconds = $timeoutOverride
+        }
+
+        $downloadParams = @{ Uri = $downloadUrl; OutFile = $downloadPath; TimeoutSec = $downloadTimeoutSeconds; ErrorAction = 'Stop' }
         if ($PSVersionTable.PSVersion.Major -eq 5) { $downloadParams.UseBasicParsing = $true }
-        Invoke-WebRequest @downloadParams
+
+        # Invoke-WebRequest progress rendering is expensive for large files in
+        # Windows PowerShell 5.1. Suppress it only during transfer and restore
+        # the caller's preference immediately afterward.
+        $previousProgressPreference = $ProgressPreference
+        try {
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest @downloadParams
+        }
+        finally {
+            $ProgressPreference = $previousProgressPreference
+        }
 
         if (-not (Test-Path -LiteralPath $downloadPath) -or (Get-Item -LiteralPath $downloadPath).Length -le 0) {
             throw 'The download did not produce a non-empty file.'
@@ -930,8 +975,16 @@ function Invoke-JWADDirectInstall {
             catch { }
         }
 
+        $msiLogPath = ''
         if ($extension -eq '.msi') {
-            $msiArgs = '/i {0} /qn /norestart' -f (ConvertTo-JWADQuotedArgument $downloadPath)
+            $safeAppLogName = [regex]::Replace($AppName, '[^A-Za-z0-9_-]', '_')
+            $msiLogPath = Join-Path $script:LogDirectory ('MSI_{0}_{1}.log' -f $safeAppLogName, (Get-Date -Format 'yyyyMMdd_HHmmssfff'))
+            $msiArgs = '/i {0} /qn /norestart /L*v {1}' -f (ConvertTo-JWADQuotedArgument $downloadPath), (ConvertTo-JWADQuotedArgument $msiLogPath)
+
+            # Google documents NOGOOGLEUPDATEPING=1 for firewall-restricted
+            # Chrome MSI deployments where Google Update checks delay setup.
+            if ($AppName -eq 'Google Chrome') { $msiArgs += ' NOGOOGLEUPDATEPING=1' }
+
             $proc = Invoke-JWADProcess -FilePath (Join-Path $env:SystemRoot 'System32\msiexec.exe') -ArgumentList $msiArgs
         }
         else {
@@ -955,7 +1008,20 @@ function Invoke-JWADDirectInstall {
             throw 'Installer returned 1638 (ERROR_PRODUCT_VERSION), but the x64 Visual C++ runtime registry key does not confirm an installed runtime.'
         }
         $installerOutput = ('{0}{1}{2}' -f [string]$proc.Output, [Environment]::NewLine, [string]$proc.Error).Trim()
-        if ($installerOutput.Length -gt 2000) { $installerOutput = $installerOutput.Substring(0, 2000) }
+        if (-not [string]::IsNullOrWhiteSpace($msiLogPath) -and (Test-Path -LiteralPath $msiLogPath)) {
+            $failureContext = @(
+                Select-String -LiteralPath $msiLogPath -Pattern 'Return value 3' -Context 8, 2 -ErrorAction SilentlyContinue |
+                    Select-Object -Last 2
+            )
+            if ($failureContext.Count -gt 0) {
+                $contextText = ($failureContext | ForEach-Object {
+                    (@($_.Context.PreContext) + @($_.Line) + @($_.Context.PostContext)) -join ' '
+                }) -join ' | '
+                $installerOutput = ('{0} MSI failure context: {1}' -f $installerOutput, $contextText).Trim()
+            }
+            $installerOutput = ('{0} MSI log: {1}' -f $installerOutput, $msiLogPath).Trim()
+        }
+        if ($installerOutput.Length -gt 4000) { $installerOutput = $installerOutput.Substring(0, 4000) }
         throw ('The direct installer returned ExitCode={0}. {1}' -f $proc.ExitCode, $installerOutput)
     }
     finally {
@@ -1282,9 +1348,9 @@ $apps = @(
     },
     [PSCustomObject]@{
         Name = 'Bulk Crap Uninstaller'; WingetId = 'Klocman.BulkCrapUninstaller'; WingetCustomArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
-        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
+        ScoopName = 'bulk-crap-uninstaller'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
         ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
-        DetectPattern = '(?i)^Bulk Crap Uninstaller'; DirectPageUrl = 'https://sourceforge.net/projects/bulk-crap-uninstaller/files/latest/download'; DirectAssetRegex = '(?i)BCUninstaller_[0-9.]+_setup\.exe'; DirectHashSuffix = ''; DirectJsonUrl = ''
+        DetectPattern = '(?i)^Bulk Crap Uninstaller'; DirectPageUrl = 'https://sourceforge.net/projects/bulk-crap-uninstaller/files/'; DirectAssetRegex = '(?i)BCUninstaller_[0-9.]+_setup\.exe'; DirectHashSuffix = ''; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
         Name = 'SumatraPDF'; WingetId = 'SumatraPDF.SumatraPDF'; WingetCustomArgs = '';
@@ -1308,7 +1374,7 @@ $apps = @(
         Name = 'VLC Media Player'; WingetId = 'VideoLAN.VLC'; WingetCustomArgs = '';
         ScoopName = 'vlc'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
         ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = 'VideoLAN';
-        DetectPattern = '(?i)^VLC media player'; DirectPageUrl = 'https://downloads.videolan.org/videolan/vlc/last/win64/'; DirectAssetRegex = '(?i)vlc-[0-9.]+-win64\.msi'; DirectHashSuffix = '.sha256'; DirectJsonUrl = ''
+        DetectPattern = '(?i)^VLC media player'; DirectPageUrl = 'https://download.videolan.org/vlc/last/win64/'; DirectAssetRegex = '(?i)^vlc-[0-9.]+-win64\.msi$'; DirectHashSuffix = '.sha256'; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
         Name = 'Google Chrome'; WingetId = 'Google.Chrome'; WingetCustomArgs = '';
