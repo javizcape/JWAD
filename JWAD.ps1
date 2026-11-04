@@ -1,8 +1,8 @@
 #====================================================================
 # SCRIPT DE IMPLEMENTACION MASIVA DE APLICACIONES (Windows x64)
 #====================================================================
-# Version: 3.0 (Enterprise Resilient & Autonomous - Noviembre 2026)
-# Autor: Arquitectura de Sistemas - JWAD
+# Version: 3.1 (Enterprise Autonomous Core - Inyeccion de Dependencias)
+# Autor: Arquitectura de Sistemas y Gobernanza Autonoma - JWAD
 # Alojado en: https://javizcape.github.io/JWAD/JWAD.ps1
 # Ejecucion:  irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
 #====================================================================
@@ -45,7 +45,7 @@ Write-Host "  ============================================" -ForegroundColor Cya
 for ($i = 0; $i -lt $JWADBannerGrande.Count; $i++) {
     Write-Host "  $($JWADBannerGrande[$i])" -ForegroundColor $JWADGradiente[$i]
 }
-Write-Host "         WINDOWS APP DEPLOYER - v3.0" -ForegroundColor DarkCyan
+Write-Host "         WINDOWS APP DEPLOYER - v3.1" -ForegroundColor DarkCyan
 Write-Host "  ============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -122,30 +122,44 @@ function Save-IncrementalReport {
 
 function Install-WingetBootstrapper {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Host "`n[*] Winget no detectado en el sistema. Iniciando instalacion automatica..." -ForegroundColor Yellow
+        Write-Host "`n[*] Winget no detectado. Iniciando inyeccion de dependencias base de arquitectura..." -ForegroundColor Yellow
         try {
             $TempDir = $env:TEMP
             $ProgressPreference = 'SilentlyContinue'
 
-            Write-Host "[-] Descargando dependencias de runtime (VCLibs)..." -ForegroundColor Gray
-            $VCLibsUrl = "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx"
+            # Fase 1: VCLibs
+            Write-Host "[-] Fase 1/4: Instalando dependencias VCLibs..." -ForegroundColor Gray
             $VCLibsPath = Join-Path $TempDir "VCLibs.appx"
-            Invoke-WebRequest -Uri $VCLibsUrl -OutFile $VCLibsPath -UseBasicParsing
+            Invoke-WebRequest -Uri "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx" -OutFile $VCLibsPath -UseBasicParsing
             Add-AppxPackage -Path $VCLibsPath -ErrorAction SilentlyContinue
 
-            Write-Host "[-] Descargando e instalando Windows Package Manager (Winget)..." -ForegroundColor Gray
-            $WingetUrl = "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"
+            # Fase 2: Microsoft.UI.Xaml 2.8 (Requerido por Winget)
+            Write-Host "[-] Fase 2/4: Instalando Microsoft.UI.Xaml..." -ForegroundColor Gray
+            $UIXamlPath = Join-Path $TempDir "UIXaml.appx"
+            Invoke-WebRequest -Uri "https://github.com/microsoft/microsoft-ui-xaml/releases/download/v2.8.6/Microsoft.UI.Xaml.2.8.x64.appx" -OutFile $UIXamlPath -UseBasicParsing
+            Add-AppxPackage -Path $UIXamlPath -ErrorAction SilentlyContinue
+
+            # Fase 3: Windows App Runtime (SOLUCION AL ERROR 0x80073CF3)
+            Write-Host "[-] Fase 3/4: Instalando Windows App Runtime (Core Framework)..." -ForegroundColor Gray
+            $WinAppRuntimePath = Join-Path $TempDir "WinAppRuntime.exe"
+            Invoke-WebRequest -Uri "https://aka.ms/windowsappsdk/latest/windowsappruntimeinstall-x64.exe" -OutFile $WinAppRuntimePath -UseBasicParsing
+            $RuntimeProc = Start-Process -FilePath $WinAppRuntimePath -ArgumentList "--quiet" -PassThru -WindowStyle Hidden
+            $RuntimeProc.WaitForExit(120000) | Out-Null # Espera de 2 min maximo
+
+            # Fase 4: Winget (DesktopAppInstaller)
+            Write-Host "[-] Fase 4/4: Desplegando Windows Package Manager (Winget)..." -ForegroundColor Gray
             $WingetPath = Join-Path $TempDir "Winget.msixbundle"
-            Invoke-WebRequest -Uri $WingetUrl -OutFile $WingetPath -UseBasicParsing
-            
+            Invoke-WebRequest -Uri "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle" -OutFile $WingetPath -UseBasicParsing
             Add-AppxPackage -Path $WingetPath -ErrorAction Stop
 
-            Remove-Item $VCLibsPath, $WingetPath -Force -ErrorAction SilentlyContinue
+            # Limpieza
+            Remove-Item $VCLibsPath, $UIXamlPath, $WinAppRuntimePath, $WingetPath -Force -ErrorAction SilentlyContinue
             Update-Environment
-            Write-Host "[OK] Winget fue instalado e integrado exitosamente." -ForegroundColor Green
+
+            Write-Host "[OK] Winget fue instalado e integrado exitosamente al sistema." -ForegroundColor Green
         } catch {
-            Write-Host "[FALLO] Error crítico al intentar instalar Winget: $_" -ForegroundColor Red
-            throw "El sistema no cuenta con Winget y el Bootstrapper falló. No se pueden instalar aplicaciones."
+            Write-Host "[FALLO] Error crítico en el Bootstrapper: $_" -ForegroundColor Red
+            throw "El sistema no cuenta con Winget y la inyeccion de dependencias (AppRuntime/UI.Xaml) fallo."
         }
     } else {
         Write-Host "`n[OK] Gestor Winget detectado correctamente." -ForegroundColor Green
@@ -176,7 +190,7 @@ function Install-AppViaWinget {
         }
 
         # Ejecución anti-colgamiento (Timeout de 10 minutos)
-        $Process = Start-Process -FilePath "winget" -ArgumentList $WingetArgs -PassThru -NoNewWindow
+        $Process = Start-Process -FilePath "winget" -ArgumentList $WingetArgs -PassThru -WindowStyle Hidden
         if (-not $Process.WaitForExit(600000)) {
             $Process | Stop-Process -Force -ErrorAction SilentlyContinue
             throw "TIMEOUT: Instalacion excedio 10 minutos."
@@ -262,9 +276,9 @@ function Install-AppViaDirectUrl {
 
         Write-Host "[-] Instalando silenciosamente..." -ForegroundColor Gray
         if ($FileName -like "*.msi") {
-            $Process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$TempPath`" /qn /norestart" -PassThru -NoNewWindow
+            $Process = Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$TempPath`" /qn /norestart" -PassThru -WindowStyle Hidden
         } else {
-            $Process = Start-Process -FilePath $TempPath -ArgumentList $Arguments -PassThru -NoNewWindow
+            $Process = Start-Process -FilePath $TempPath -ArgumentList $Arguments -PassThru -WindowStyle Hidden
         }
 
         if (-not $Process.WaitForExit(600000)) {
@@ -310,7 +324,7 @@ function Show-JWADProgressBar {
 # BLOQUE PRINCIPAL DE EJECUCION CON PROTECCION FINALLY
 #====================================================================
 try {
-    # 1. Asegurar existencia de Winget
+    # 1. Asegurar existencia de Winget resolviendo dependencias modernas
     Write-Host "`n=========================================================" -ForegroundColor Cyan
     Write-Host " PREPARANDO ENTORNO DE DESPLIEGUE (BOOTSTRAPPER)" -ForegroundColor Cyan
     Write-Host "=========================================================" -ForegroundColor Cyan
