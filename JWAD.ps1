@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 JWAD - Windows App Deployer
-Version: 3.2.3 (requested catalog order and OS-aware .NET Framework runtime installation)
+Version: 3.2.4 (correct .NET Framework reboot-required handling)
 Compatibilidad objetivo: Windows 10/11 x64; Windows PowerShell 5.1 y PowerShell 7+
 
 IMPORTANTE:
@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 # -----------------------------------------------------------------------------
 # CONFIGURACION GLOBAL
 # -----------------------------------------------------------------------------
-$script:JWADVersion = '3.2.3'
+$script:JWADVersion = '3.2.4'
 $script:JWADStarted = [System.Diagnostics.Stopwatch]::StartNew()
 $script:JWADIsAdmin = $false
 $script:ScoopBootstrapAttempted = $false
@@ -2082,11 +2082,21 @@ function Install-JWADDotNetFramework {
         $arguments = '/q /norestart /ChainingPackage JWAD'
         $processResult = Invoke-JWADProcess -FilePath $installerPath -ArgumentList $arguments -TimeoutSeconds 1800
 
-        # Verify by the official Release DWORD after setup. Some installers can
-        # return a nonzero code if the target is already staged; registry state
-        # remains the authoritative confirmation of the installed in-place runtime.
+        # The .NET Framework redistributable documents 3010 and 1641 as
+        # successful installation results that require a restart. The Release
+        # DWORD can remain at the pre-update value until Windows completes the
+        # pending servicing operation during reboot. Poll briefly before making
+        # that distinction; never misreport a documented success code as FAILED.
         $postRelease = Get-JWADDotNetFrameworkRelease
         $postName = Get-JWADDotNetReleaseName -Release $postRelease
+        if ($processResult.ExitCode -in @(3010, 1641)) {
+            for ($verifyAttempt = 0; $verifyAttempt -lt 5 -and $postRelease -lt [int]$target.MinimumRelease; $verifyAttempt++) {
+                Start-Sleep -Seconds 2
+                $postRelease = Get-JWADDotNetFrameworkRelease
+                $postName = Get-JWADDotNetReleaseName -Release $postRelease
+            }
+        }
+
         if ($postRelease -ge [int]$target.MinimumRelease) {
             $resultStatus = 'INSTALLED'
             if ($processResult.ExitCode -in @(3010, 1641)) { $resultStatus = 'INSTALLED_REBOOT_REQUIRED' }
@@ -2094,9 +2104,16 @@ function Install-JWADDotNetFramework {
             return (New-JWADResult -Name $displayName -Status $resultStatus -Method $method -Version $postName -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage $null)
         }
 
+        if ($processResult.ExitCode -in @(3010, 1641)) {
+            $pendingMessage = ('Microsoft .NET Framework Setup devolvio ExitCode={0}, que significa que la operacion fue exitosa y requiere reiniciar Windows. El registro todavia muestra .NET Framework {1} (Release {2}); la confirmacion de {3} queda pendiente hasta despues del reinicio. Reinicie el equipo y vuelva a ejecutar JWAD: si la actualizacion se completo, se detectara como ALREADY_PRESENT sin reinstalar.' -f $processResult.ExitCode, $postName, $postRelease, $target.Version)
+            $timer.Stop()
+            $pendingVersion = '{0} (reinicio requerido; verificacion pendiente)' -f $target.Version
+            return (New-JWADResult -Name $displayName -Status 'INSTALLED_REBOOT_REQUIRED' -Method $method -Version $pendingVersion -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage $pendingMessage)
+        }
+
         $output = ('{0}{1}{2}' -f [string]$processResult.Output, [Environment]::NewLine, [string]$processResult.Error).Trim()
         if ($output.Length -gt 1500) { $output = $output.Substring(0, 1500) }
-        throw ('El instalador de .NET Framework {0} termino con ExitCode={1}, pero el registro no confirma la version requerida. Release actual={2}. {3}' -f $target.Version, $processResult.ExitCode, $postRelease, $output)
+        throw ('El instalador de .NET Framework {0} termino con ExitCode={1}, pero el registro no confirma la version requerida. Release actual={2} ({3}). {4}' -f $target.Version, $processResult.ExitCode, $postRelease, $postName, $output)
     }
     catch {
         $timer.Stop()
@@ -2347,9 +2364,9 @@ foreach ($app in $apps) {
         if ([string]$actionProperty.Value -eq 'InstallDotNetFramework') {
             $dotNetResult = Install-JWADDotNetFramework
             $script:InstallResults.Add($dotNetResult)
-            $dotNetLevel = if ($dotNetResult.estado -in @('INSTALLED', 'INSTALLED_REBOOT_REQUIRED', 'ALREADY_PRESENT')) { 'OK' } else { 'ERROR' }
+            $dotNetLevel = if ($dotNetResult.estado -eq 'INSTALLED_REBOOT_REQUIRED') { 'WARN' } elseif ($dotNetResult.estado -in @('INSTALLED', 'ALREADY_PRESENT')) { 'OK' } else { 'ERROR' }
             $dotNetMessage = '.NET Framework: {0} mediante {1}; version {2}' -f $dotNetResult.estado, $dotNetResult.metodo_instalacion, $dotNetResult.version_instalada
-            if ($dotNetResult.estado -eq 'FAILED' -and -not [string]::IsNullOrWhiteSpace($dotNetResult.error_mensaje)) {
+            if ($dotNetResult.estado -in @('FAILED', 'INSTALLED_REBOOT_REQUIRED') -and -not [string]::IsNullOrWhiteSpace($dotNetResult.error_mensaje)) {
                 $dotNetMessage += ' | Detalle: ' + $dotNetResult.error_mensaje
             }
             Write-JWADMessage -Level $dotNetLevel -Message $dotNetMessage
@@ -2375,7 +2392,7 @@ else {
 
 $script:JWADStarted.Stop()
 $failed = @($script:InstallResults | Where-Object { $_.estado -eq 'FAILED' }).Count
-$validationPending = @($script:InstallResults | Where-Object { $_.estado -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'UPDATE_BLOCKED', 'POLICY_MANAGED', 'STORE_MANAGED') }).Count
+$validationPending = @($script:InstallResults | Where-Object { $_.estado -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'UPDATE_BLOCKED', 'POLICY_MANAGED', 'STORE_MANAGED', 'INSTALLED_REBOOT_REQUIRED') }).Count
 $report = [ordered]@{
     version_script = $script:JWADVersion
     timestamp = (Get-Date -Format 'o')
@@ -2426,7 +2443,7 @@ Write-Host '============================================================' -Foreg
 foreach ($item in $script:InstallResults) {
     $color = 'Green'
     if ($item.estado -eq 'FAILED') { $color = 'Red' }
-    elseif ($item.estado -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'STORE_MANAGED', 'NOT_SUPPORTED', 'UPDATE_BLOCKED', 'POLICY_MANAGED')) { $color = 'Yellow' }
+    elseif ($item.estado -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'STORE_MANAGED', 'NOT_SUPPORTED', 'UPDATE_BLOCKED', 'POLICY_MANAGED', 'INSTALLED_REBOOT_REQUIRED')) { $color = 'Yellow' }
     elseif ($item.estado -in @('UP_TO_DATE', 'ALREADY_PRESENT', 'INSTALLED_ALREADY_PRESENT')) { $color = 'Green' }
     Write-Host ('[{0}] {1} | metodo={2} | version={3} | {4}s' -f $item.estado, $item.app_name, $item.metodo_instalacion, $item.version_instalada, $item.tiempo_instalacion_segundos) -ForegroundColor $color
 }
