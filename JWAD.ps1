@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 JWAD - Windows App Deployer
-Version: 3.2.4 (correct .NET Framework reboot-required handling)
+Version: 3.2.5 (frontend presentation refresh; installation logic unchanged)
 Compatibilidad objetivo: Windows 10/11 x64; Windows PowerShell 5.1 y PowerShell 7+
 
 IMPORTANTE:
@@ -26,8 +26,9 @@ $ErrorActionPreference = 'Stop'
 # -----------------------------------------------------------------------------
 # CONFIGURACION GLOBAL
 # -----------------------------------------------------------------------------
-$script:JWADVersion = '3.2.4'
+$script:JWADVersion = '3.2.5'
 $script:JWADStarted = [System.Diagnostics.Stopwatch]::StartNew()
+$script:JWADStartDateTime = Get-Date
 $script:JWADIsAdmin = $false
 $script:ScoopBootstrapAttempted = $false
 $script:ScoopBootstrapSucceeded = $false
@@ -236,6 +237,225 @@ function Write-JWADMessage {
     catch {
         # Un fallo del log no debe detener las instalaciones.
     }
+}
+
+function Get-JWADPresentationInfo {
+    [CmdletBinding()]
+    param()
+
+    $info = [ordered]@{
+        ComputerName = $env:COMPUTERNAME
+        Manufacturer = 'N/A'
+        Model = 'N/A'
+        OperatingSystem = 'Windows'
+        DisplayVersion = 'N/A'
+        Build = 'N/A'
+        Processor = 'N/A'
+        MemoryGB = 'N/A'
+        Architecture = $(if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' })
+        PowerShell = [string]$PSVersionTable.PSVersion
+        StartDateTime = $script:JWADStartDateTime
+    }
+
+    try {
+        $computer = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace([string]$computer.Manufacturer)) { $info.Manufacturer = [string]$computer.Manufacturer }
+        if (-not [string]::IsNullOrWhiteSpace([string]$computer.Model)) { $info.Model = [string]$computer.Model }
+        if ([double]$computer.TotalPhysicalMemory -gt 0) {
+            $info.MemoryGB = '{0:N2} GB' -f ([double]$computer.TotalPhysicalMemory / 1GB)
+        }
+    }
+    catch { }
+
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace([string]$os.Caption)) { $info.OperatingSystem = [string]$os.Caption }
+        if (-not [string]::IsNullOrWhiteSpace([string]$os.BuildNumber)) { $info.Build = [string]$os.BuildNumber }
+        if ($os.PSObject.Properties['OSArchitecture'] -and -not [string]::IsNullOrWhiteSpace([string]$os.OSArchitecture)) {
+            $info.Architecture = [string]$os.OSArchitecture
+        }
+    }
+    catch { }
+
+    try {
+        $currentVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop
+        if (-not [string]::IsNullOrWhiteSpace([string]$currentVersion.DisplayVersion)) {
+            $info.DisplayVersion = [string]$currentVersion.DisplayVersion
+        }
+        $buildNumber = [string]$currentVersion.CurrentBuildNumber
+        if ([string]::IsNullOrWhiteSpace($buildNumber)) { $buildNumber = [string]$currentVersion.CurrentBuild }
+        if (-not [string]::IsNullOrWhiteSpace($buildNumber)) {
+            $info.Build = $buildNumber
+            if ($null -ne $currentVersion.UBR) { $info.Build = '{0}.{1}' -f $buildNumber, $currentVersion.UBR }
+        }
+    }
+    catch { }
+
+    try {
+        $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        if ($cpu -and -not [string]::IsNullOrWhiteSpace([string]$cpu.Name)) { $info.Processor = ([string]$cpu.Name).Trim() }
+    }
+    catch { }
+
+    return [PSCustomObject]$info
+}
+
+function Write-JWADStartupBanner {
+    [CmdletBinding()]
+    param()
+
+    $banner = @(
+        '     ___        ___    ____  ',
+        '    | \ \      / / \  |  _ \ ',
+        ' _  | |\ \ /\ / / _ \ | | | |',
+        '| |_| | \ V  V / ___ \| |_| |',
+        ' \___/   \_/\_/_/   \_\____/ '
+    )
+    $gradient = @('Cyan', 'Blue', 'White', 'Blue', 'Cyan')
+
+    Write-Host ''
+    Write-Host '  ====================================================================' -ForegroundColor Cyan
+    for ($i = 0; $i -lt $banner.Count; $i++) {
+        Write-Host ('  ' + $banner[$i]) -ForegroundColor $gradient[$i]
+    }
+    Write-Host ('             WINDOWS APP DEPLOYER - JWAD v{0}' -f $script:JWADVersion) -ForegroundColor DarkCyan
+    Write-Host '             javizcape.github.io/JWAD' -ForegroundColor DarkGray
+    Write-Host '  ====================================================================' -ForegroundColor Cyan
+    Write-Host ''
+}
+
+function Write-JWADSystemInfo {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][PSObject]$Info,
+        [ValidateSet('START', 'END')][string]$Phase = 'START',
+        [double]$ElapsedSeconds = 0
+    )
+
+    $now = Get-Date
+    $osText = [string]$Info.OperatingSystem
+    if (-not [string]::IsNullOrWhiteSpace([string]$Info.DisplayVersion) -and [string]$Info.DisplayVersion -ne 'N/A') {
+        $osText += ' ' + [string]$Info.DisplayVersion
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$Info.Build) -and [string]$Info.Build -ne 'N/A') {
+        $osText += ' (Build ' + [string]$Info.Build + ')'
+    }
+
+    Write-Host ''
+    if ($Phase -eq 'START') {
+        Write-Host '  SYSTEM INFORMATION' -ForegroundColor Cyan
+    }
+    else {
+        Write-Host '  EXECUTION SUMMARY - SYSTEM' -ForegroundColor Cyan
+    }
+    Write-Host ('  Date/time start : {0}' -f $Info.StartDateTime.ToString('yyyy-MM-dd HH:mm:ss zzz')) -ForegroundColor Gray
+    if ($Phase -eq 'END') {
+        Write-Host ('  Date/time end   : {0}' -f $now.ToString('yyyy-MM-dd HH:mm:ss zzz')) -ForegroundColor Gray
+    }
+    Write-Host ('  Computer        : {0}' -f (ConvertTo-JWADAsciiText -Text ([string]$Info.ComputerName))) -ForegroundColor Gray
+    Write-Host ('  Manufacturer    : {0}' -f (ConvertTo-JWADAsciiText -Text ('{0} {1}' -f $Info.Manufacturer, $Info.Model))) -ForegroundColor Gray
+    Write-Host ('  Operating system: {0}' -f (ConvertTo-JWADAsciiText -Text $osText)) -ForegroundColor Gray
+    Write-Host ('  Architecture    : {0}' -f $Info.Architecture) -ForegroundColor Gray
+    Write-Host ('  Processor       : {0}' -f (ConvertTo-JWADAsciiText -Text ([string]$Info.Processor))) -ForegroundColor Gray
+    Write-Host ('  RAM             : {0}' -f $Info.MemoryGB) -ForegroundColor Gray
+    Write-Host ('  PowerShell      : {0}' -f $Info.PowerShell) -ForegroundColor Gray
+    Write-Host ('  JWAD version    : {0}' -f $script:JWADVersion) -ForegroundColor Gray
+    if ($Phase -eq 'END') {
+        Write-Host ('  Execution time  : {0:N2} seconds' -f $ElapsedSeconds) -ForegroundColor Yellow
+    }
+    Write-Host ''
+}
+
+function Format-JWADDisplayCell {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$Value,
+        [Parameter(Mandatory = $true)][ValidateRange(1, 200)][int]$Width
+    )
+
+    $text = ConvertTo-JWADAsciiText -Text ([string]$Value)
+    if ($text.Length -gt $Width) {
+        if ($Width -le 3) { return $text.Substring(0, $Width) }
+        return ($text.Substring(0, $Width - 3) + '...')
+    }
+    return $text
+}
+
+function Show-JWADFinalPresentation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Results,
+        [Parameter(Mandatory = $true)][PSObject]$SystemInfo,
+        [Parameter(Mandatory = $true)][int]$Failed,
+        [Parameter(Mandatory = $true)][int]$ValidationPending,
+        [Parameter(Mandatory = $true)][string]$ReportPath,
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [Parameter(Mandatory = $true)][double]$ElapsedSeconds
+    )
+
+    Write-Host ''
+    Write-Host '  ==================================================================================================================' -ForegroundColor Green
+    Write-Host '                                      JWAD - FINAL DEPLOYMENT REPORT' -ForegroundColor Green
+    Write-Host '  ==================================================================================================================' -ForegroundColor Green
+    Write-JWADSystemInfo -Info $SystemInfo -Phase 'END' -ElapsedSeconds $ElapsedSeconds
+
+    $consoleWidth = 140
+    try {
+        $reportedWidth = [int]$Host.UI.RawUI.WindowSize.Width
+        if ($reportedWidth -ge 100) { $consoleWidth = $reportedWidth }
+    }
+    catch { }
+
+    $usableWidth = [Math]::Max(108, [Math]::Min(190, $consoleWidth - 2))
+    $statusWidth = 29
+    $methodWidth = 16
+    $timeWidth = 10
+    $remaining = $usableWidth - $statusWidth - $methodWidth - $timeWidth - 12
+    $appWidth = [Math]::Min(40, [Math]::Max(22, [int][Math]::Floor($remaining * 0.48)))
+    $versionWidth = [Math]::Max(14, $remaining - $appWidth)
+    $format = '{0,-' + $statusWidth + '} | {1,-' + $appWidth + '} | {2,-' + $methodWidth + '} | {3,-' + $versionWidth + '} | {4,' + $timeWidth + '}'
+
+    Write-Host '  APPLICATION RESULTS' -ForegroundColor Cyan
+    Write-Host ('  ' + ('-' * ($usableWidth - 4))) -ForegroundColor DarkGray
+    Write-Host ('  ' + ($format -f 'STATUS', 'APPLICATION', 'METHOD', 'VERSION', 'TIME')) -ForegroundColor Cyan
+    Write-Host ('  ' + ('-' * ($usableWidth - 4))) -ForegroundColor DarkGray
+
+    foreach ($item in $Results) {
+        $status = [string]$item.estado
+        $application = Format-JWADDisplayCell -Value $item.app_name -Width $appWidth
+        $method = Format-JWADDisplayCell -Value $item.metodo_instalacion -Width $methodWidth
+        $version = Format-JWADDisplayCell -Value $item.version_instalada -Width $versionWidth
+        $seconds = ([double]$item.tiempo_instalacion_segundos).ToString('0.00', [Globalization.CultureInfo]::InvariantCulture) + 's'
+        $statusCell = Format-JWADDisplayCell -Value ('[' + $status + ']') -Width $statusWidth
+        $row = '  ' + ($format -f $statusCell, $application, $method, $version, $seconds)
+
+        $color = 'Green'
+        if ($status -eq 'FAILED') { $color = 'Red' }
+        elseif ($status -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'STORE_MANAGED', 'NOT_SUPPORTED', 'UPDATE_BLOCKED', 'POLICY_MANAGED', 'INSTALLED_REBOOT_REQUIRED')) { $color = 'Yellow' }
+        Write-Host $row -ForegroundColor $color
+    }
+
+    Write-Host ('  ' + ('-' * ($usableWidth - 4))) -ForegroundColor DarkGray
+    Write-Host ('  Failures: {0} | Pending validations: {1}' -f $Failed, $ValidationPending) -ForegroundColor $(if ($Failed -gt 0) { 'Red' } elseif ($ValidationPending -gt 0) { 'Yellow' } else { 'Green' })
+    Write-Host ('  Report: {0}' -f (ConvertTo-JWADAsciiText -Text $ReportPath)) -ForegroundColor Green
+    Write-Host ('  Log   : {0}' -f (ConvertTo-JWADAsciiText -Text $LogPath)) -ForegroundColor DarkGray
+
+}
+
+function Write-JWADFooterBanner {
+    [CmdletBinding()]
+    param()
+
+    $footerBanner = @(
+        '    ___      ___   ___  ',
+        ' _ | \ \    / /_\ |   \ ',
+        '| || |\ \/\/ / _ \| |) |',
+        ' \__/  \_/\_/_/ \_\___/ '
+    )
+    Write-Host ''
+    foreach ($line in $footerBanner) { Write-Host ('  ' + $line) -ForegroundColor DarkGray }
+    Write-Host '  javizcape.github.io/JWAD' -ForegroundColor DarkCyan
+    Write-Host ''
 }
 
 function Show-JWADProgress {
@@ -2206,11 +2426,8 @@ function Get-JWADTelemetry {
 # -----------------------------------------------------------------------------
 # PRECONDICIONES Y CATALOGO
 # -----------------------------------------------------------------------------
-Write-Host ''
-Write-Host '============================================================' -ForegroundColor Cyan
-Write-Host (' WINDOWS APP DEPLOYER - JWAD v{0}' -f $script:JWADVersion) -ForegroundColor Cyan
-Write-Host ' Fallback: Winget -> Scoop -> Descarga directa verificada' -ForegroundColor DarkCyan
-Write-Host '============================================================' -ForegroundColor Cyan
+Write-JWADStartupBanner
+Write-Host '  Fallback: Winget -> Scoop -> Descarga directa verificada' -ForegroundColor DarkCyan
 
 if (-not [Environment]::Is64BitOperatingSystem -or
     ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64')) {
@@ -2254,6 +2471,8 @@ else {
     Write-JWADMessage -Level 'WARN' -Message 'Contexto no elevado. Algunos instaladores podran requerir permisos administrativos/UAC.'
 }
 Write-JWADMessage -Level 'INFO' -Message ('PowerShell {0}; SO {1}-bit.' -f $PSVersionTable.PSVersion, $(if ([Environment]::Is64BitOperatingSystem) { 64 } else { 32 }))
+$script:JWADPresentationInfo = Get-JWADPresentationInfo
+Write-JWADSystemInfo -Info $script:JWADPresentationInfo -Phase 'START'
 
 # El catalogo mantiene datos por paquete. Los campos vacios son deliberados:
 # no se inventan IDs, manifiestos, assets ni argumentos silenciosos.
@@ -2434,25 +2653,15 @@ catch {
 }
 
 # -----------------------------------------------------------------------------
-# RESUMEN FINAL
+# RESUMEN FINAL - PRESENTACION FRONTEND
+# La logica de instalaciones, estados, contadores y reporte JSON no se modifica.
 # -----------------------------------------------------------------------------
-Write-Host ''
-Write-Host '============================================================' -ForegroundColor Green
-Write-Host ' RESUMEN FINAL JWAD' -ForegroundColor Green
-Write-Host '============================================================' -ForegroundColor Green
-foreach ($item in $script:InstallResults) {
-    $color = 'Green'
-    if ($item.estado -eq 'FAILED') { $color = 'Red' }
-    elseif ($item.estado -in @('OUTDATED', 'UNKNOWN', 'PRESENT_UPDATE_UNKNOWN', 'STORE_MANAGED', 'NOT_SUPPORTED', 'UPDATE_BLOCKED', 'POLICY_MANAGED', 'INSTALLED_REBOOT_REQUIRED')) { $color = 'Yellow' }
-    elseif ($item.estado -in @('UP_TO_DATE', 'ALREADY_PRESENT', 'INSTALLED_ALREADY_PRESENT')) { $color = 'Green' }
-    Write-Host ('[{0}] {1} | metodo={2} | version={3} | {4}s' -f $item.estado, $item.app_name, $item.metodo_instalacion, $item.version_instalada, $item.tiempo_instalacion_segundos) -ForegroundColor $color
-}
-Write-Host ''
-Write-Host ('Fallos: {0} | Validaciones pendientes: {1} | Reporte: {2}' -f $failed, $validationPending, $script:ReportPath) -ForegroundColor Cyan
-Write-Host ('Log: {0}' -f $script:LogPath) -ForegroundColor DarkGray
+$finalElapsedSeconds = [Math]::Round($script:JWADStarted.Elapsed.TotalSeconds, 2)
+Show-JWADFinalPresentation -Results $script:InstallResults.ToArray() -SystemInfo $script:JWADPresentationInfo -Failed $failed -ValidationPending $validationPending -ReportPath $script:ReportPath -LogPath $script:LogPath -ElapsedSeconds $finalElapsedSeconds
 if ($failed -gt 0 -or $validationPending -gt 0) {
     Write-JWADMessage -Level 'WARN' -Message ('El proceso termino con {0} fallos de instalacion y {1} validaciones pendientes. Consulte el JSON/log.' -f $failed, $validationPending)
 }
 else {
     Write-JWADMessage -Level 'OK' -Message 'No se registraron fallos de instalacion ni validaciones pendientes.'
 }
+Write-JWADFooterBanner
