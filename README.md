@@ -41,17 +41,21 @@
 1. Pulsa **Inicio**, escribe `PowerShell` y abre **Windows PowerShell** o **PowerShell 7**.
 2. Copia, pega y presiona **Enter**:
 
-**Windows 10 / 11 (x64):**
+> [!TIP]
+> ![Comando principal recomendado](https://img.shields.io/badge/POWERSHELL-COMANDO_RECOMENDADO-0078D6?style=for-the-badge&logo=powershell&logoColor=white)
+> ![Copiar pegar y ejecutar](https://img.shields.io/badge/COPIAR-PEGAR_Y_EJECUTAR-ff9f1c?style=for-the-badge)
+>
+> ```powershell
+> irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
+> ```
 
-```powershell
-irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
-```
-
-**Alternativa** cuando `irm` no consigue descargar el archivo, pero `curl.exe` sí tiene acceso al sitio:
-
-```powershell
-iex (curl.exe -s https://javizcape.github.io/JWAD/JWAD.ps1 | Out-String)
-```
+> [!NOTE]
+> ![Comando alternativo](https://img.shields.io/badge/ALTERNATIVA-CURL.EXE-ff9f1c?style=for-the-badge&logo=windowsterminal&logoColor=white)
+> ![Copiar pegar y ejecutar](https://img.shields.io/badge/COPIAR-PEGAR_Y_EJECUTAR-0078D6?style=for-the-badge)
+>
+> ```powershell
+> iex (curl.exe -s https://javizcape.github.io/JWAD/JWAD.ps1 | Out-String)
+> ```
 
 > **Importante:** ambos comandos descargan el script desde GitHub Pages y lo ejecutan en la sesión de PowerShell. La alternativa con `curl.exe` no evita un bloqueo del dominio o de DNS: utiliza la misma dirección. Antes de ejecutar código remoto, revisa el [script JWAD.ps1 en GitHub](https://github.com/javizcape/JWAD/blob/main/JWAD.ps1).
 
@@ -98,7 +102,7 @@ Después de revisar y cerrar el Bloc de notas, ejecuta:
 
 ## 🧭 ¿Qué es JWAD?
 
-**JWAD (Windows App Deployer)** es un script de automatización desarrollado en PowerShell. Su versión adjunta en este proyecto es la **3.2.5** y organiza la preparación de un equipo Windows x64 en **14 pasos**: 13 aplicaciones de uso general y una comprobación/instalación específica de .NET Framework.
+**JWAD (Windows App Deployer)** es un script de automatización desarrollado en PowerShell. Organiza la preparación de un equipo Windows x64 en **14 pasos**: 13 aplicaciones de uso general y una comprobación/instalación específica de .NET Framework.
 
 Para cada aplicación, JWAD utiliza una estrategia de instalación escalonada: **WinGet → Scoop → descarga directa verificada**. No todos los programas tienen configurada cada una de esas fuentes; el script solo intenta un método cuando el catálogo contiene los identificadores, manifiestos o datos de descarga necesarios. Si una vía no está configurada o falla, puede probar la siguiente que sí esté definida.
 
@@ -139,7 +143,7 @@ Además de instalar, el script detecta aplicaciones existentes, compara versione
 
 ## ⚙️ Cómo funciona
 
-El flujo general de la versión 3.2.5 es el siguiente:
+El flujo general de JWAD es el siguiente:
 
 ```mermaid
 flowchart TD
@@ -401,7 +405,7 @@ Algunos instaladores devuelven códigos como `3010` o `1641`, que indican que la
 <details>
 <summary><b>¿JWAD es compatible con Windows ARM64 o Windows Server?</b></summary>
 
-No. La versión 3.2.5 valida Windows 10/11 cliente y arquitectura AMD64/x64. En otro tipo de sistema detiene la ejecución o no ofrece compatibilidad para las aplicaciones que así lo requieren.
+No. JWAD valida Windows 10/11 cliente y arquitectura AMD64/x64. En otro tipo de sistema detiene la ejecución o no ofrece compatibilidad para las aplicaciones que así lo requieren.
 </details>
 
 <details>
