@@ -45,17 +45,13 @@
 > ![Comando principal recomendado](https://img.shields.io/badge/POWERSHELL-COMANDO_RECOMENDADO-0078D6?style=for-the-badge&logo=powershell&logoColor=white)
 > ![Copiar pegar y ejecutar](https://img.shields.io/badge/COPIAR-PEGAR_Y_EJECUTAR-ff9f1c?style=for-the-badge)
 >
-> ```powershell
-> irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex
-> ```
+> <h2><code>irm https://javizcape.github.io/JWAD/JWAD.ps1 | iex</code></h2>
 
 > [!NOTE]
 > ![Comando alternativo](https://img.shields.io/badge/ALTERNATIVA-CURL.EXE-ff9f1c?style=for-the-badge&logo=windowsterminal&logoColor=white)
 > ![Copiar pegar y ejecutar](https://img.shields.io/badge/COPIAR-PEGAR_Y_EJECUTAR-0078D6?style=for-the-badge)
 >
-> ```powershell
-> iex (curl.exe -s https://javizcape.github.io/JWAD/JWAD.ps1 | Out-String)
-> ```
+> <h2><code>iex (curl.exe -s https://javizcape.github.io/JWAD/JWAD.ps1 | Out-String)</code></h2>
 
 > **Importante:** ambos comandos descargan el script desde GitHub Pages y lo ejecutan en la sesión de PowerShell. La alternativa con `curl.exe` no evita un bloqueo del dominio o de DNS: utiliza la misma dirección. Antes de ejecutar código remoto, revisa el [script JWAD.ps1 en GitHub](https://github.com/javizcape/JWAD/blob/main/JWAD.ps1).
 
