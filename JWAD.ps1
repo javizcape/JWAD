@@ -1,7 +1,7 @@
 #requires -Version 5.1
 <#
 JWAD - Windows App Deployer
-Version: 3.2.2 (targeted corrections: BCU, Scoop inventory, FlyPhotos MSI, Edge Update, dynamic version checks)
+Version: 3.2.3 (requested catalog order and OS-aware .NET Framework runtime installation)
 Compatibilidad objetivo: Windows 10/11 x64; Windows PowerShell 5.1 y PowerShell 7+
 
 IMPORTANTE:
@@ -26,7 +26,7 @@ $ErrorActionPreference = 'Stop'
 # -----------------------------------------------------------------------------
 # CONFIGURACION GLOBAL
 # -----------------------------------------------------------------------------
-$script:JWADVersion = '3.2.2'
+$script:JWADVersion = '3.2.3'
 $script:JWADStarted = [System.Diagnostics.Stopwatch]::StartNew()
 $script:JWADIsAdmin = $false
 $script:ScoopBootstrapAttempted = $false
@@ -1908,24 +1908,199 @@ function Install-UniversalApp {
 }
 
 # -----------------------------------------------------------------------------
-# VALIDACION DE .NET FRAMEWORK 4.x (NO SE FUERZA REINSTALACION)
+# INSTALACION REAL DE .NET FRAMEWORK RUNTIME (VERSION MAS ALTA COMPATIBLE)
 # -----------------------------------------------------------------------------
-function Test-JWADDotNetFramework {
+function Get-JWADDotNetFrameworkRelease {
     [CmdletBinding()]
     param()
-    $timer = [Diagnostics.Stopwatch]::StartNew()
+
+    $baseKey = $null
+    $releaseKey = $null
     try {
-        $key = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' -ErrorAction Stop
-        $release = [int]$key.Release
-        $timer.Stop()
-        if ($release -ge 528040) {
-            return (New-JWADResult -Name '.NET Framework 4.8+' -Status 'VALIDATED' -Method 'Registry' -Version ('Release {0}' -f $release) -Seconds $timer.Elapsed.TotalSeconds)
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64
+        )
+        $releaseKey = $baseKey.OpenSubKey('SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full')
+        if ($null -eq $releaseKey) { return 0 }
+        $value = $releaseKey.GetValue('Release', 0)
+        return [int]$value
+    }
+    finally {
+        if ($null -ne $releaseKey) { $releaseKey.Dispose() }
+        if ($null -ne $baseKey) { $baseKey.Dispose() }
+    }
+}
+
+function Get-JWADDotNetReleaseName {
+    [CmdletBinding()]
+    param([int]$Release)
+
+    if ($Release -ge 533320) { return '4.8.1' }
+    if ($Release -ge 528040) { return '4.8' }
+    if ($Release -ge 461808) { return '4.7.2' }
+    if ($Release -ge 461308) { return '4.7.1' }
+    if ($Release -ge 460798) { return '4.7' }
+    if ($Release -ge 394802) { return '4.6.2' }
+    if ($Release -ge 394254) { return '4.6.1' }
+    if ($Release -ge 393295) { return '4.6' }
+    if ($Release -ge 379893) { return '4.5.2' }
+    if ($Release -ge 378675) { return '4.5.1' }
+    if ($Release -ge 378389) { return '4.5' }
+    if ($Release -gt 0) { return 'anterior a 4.5' }
+    return 'no detectado'
+}
+
+function Get-JWADDotNetTarget {
+    [CmdletBinding()]
+    param()
+
+    $baseKey = $null
+    $osKey = $null
+    try {
+        $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::LocalMachine,
+            [Microsoft.Win32.RegistryView]::Registry64
+        )
+        $osKey = $baseKey.OpenSubKey('SOFTWARE\Microsoft\Windows NT\CurrentVersion')
+        if ($null -eq $osKey) { throw 'No se pudo leer la version de Windows desde el registro.' }
+
+        $buildValue = $osKey.GetValue('CurrentBuildNumber', $osKey.GetValue('CurrentBuild', '0'))
+        $build = 0
+        if (-not [int]::TryParse([string]$buildValue, [ref]$build) -or $build -lt 10240) {
+            throw ('Compilacion de Windows no reconocida: {0}' -f $buildValue)
         }
-        return (New-JWADResult -Name '.NET Framework 4.8+' -Status 'OUTDATED' -Method 'Registry' -Version ('Release {0}' -f $release) -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage 'Actualizar mediante Windows Update o el instalador oficial correspondiente.')
+
+        # Microsoft support matrix:
+        # Win10 20H2+ (build 19042+) and all Win11 -> .NET Framework 4.8.1.
+        # Win10 1607-2004 (build 14393-19041) -> .NET Framework 4.8.
+        # Win10 1507/1511 (build 10240-10586) -> .NET Framework 4.6.2.
+        if ($build -ge 19042) {
+            return [PSCustomObject]@{
+                Version = '4.8.1'
+                MinimumRelease = 533320
+                Url = 'https://go.microsoft.com/fwlink/?linkid=2203305'
+                FileName = 'NDP481-x86-x64-AllOS-ENU.exe'
+                WindowsBuild = $build
+            }
+        }
+        if ($build -ge 14393) {
+            return [PSCustomObject]@{
+                Version = '4.8'
+                MinimumRelease = 528040
+                Url = 'https://go.microsoft.com/fwlink/?linkid=2088631'
+                FileName = 'NDP48-x86-x64-AllOS-ENU.exe'
+                WindowsBuild = $build
+            }
+        }
+        return [PSCustomObject]@{
+            Version = '4.6.2'
+            MinimumRelease = 394802
+            Url = 'https://go.microsoft.com/fwlink/?linkid=2099468'
+            FileName = 'NDP462-KB3151800-x86-x64-AllOS-ENU.exe'
+            WindowsBuild = $build
+        }
+    }
+    finally {
+        if ($null -ne $osKey) { $osKey.Dispose() }
+        if ($null -ne $baseKey) { $baseKey.Dispose() }
+    }
+}
+
+function Install-JWADDotNetFramework {
+    [CmdletBinding()]
+    param()
+
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $displayName = '.NET Framework Runtime'
+    $method = 'Direct Microsoft'
+    $installerPath = ''
+
+    try {
+        $target = Get-JWADDotNetTarget
+        $currentRelease = Get-JWADDotNetFrameworkRelease
+        $currentName = Get-JWADDotNetReleaseName -Release $currentRelease
+
+        # .NET Framework 4.x is an in-place update. Never attempt to install an
+        # older runtime over a newer one, or reinstall an already sufficient one.
+        if ($currentRelease -ge [int]$target.MinimumRelease) {
+            $timer.Stop()
+            return (New-JWADResult -Name $displayName -Status 'ALREADY_PRESENT' -Method 'Registry' -Version $currentName -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage $null)
+        }
+
+        if (-not $script:JWADIsAdmin) {
+            throw ('Se requiere una consola elevada para instalar .NET Framework {0}. Version actual: {1}.' -f $target.Version, $currentName)
+        }
+
+        $installerPath = Join-Path $script:PackageCacheDirectory $target.FileName
+        $mustDownload = $true
+        if (Test-Path -LiteralPath $installerPath) {
+            $existingSignature = Get-AuthenticodeSignature -FilePath $installerPath
+            if ($existingSignature.Status -eq 'Valid' -and
+                $existingSignature.SignerCertificate -and
+                $existingSignature.SignerCertificate.Subject -match '(?i)CN=Microsoft Corporation') {
+                $mustDownload = $false
+            }
+            else {
+                Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        if ($mustDownload) {
+            $previousProgressPreference = $ProgressPreference
+            try {
+                $ProgressPreference = 'SilentlyContinue'
+                $downloadParams = @{
+                    Uri = $target.Url
+                    OutFile = $installerPath
+                    TimeoutSec = 600
+                    ErrorAction = 'Stop'
+                }
+                if ($PSVersionTable.PSVersion.Major -eq 5) { $downloadParams.UseBasicParsing = $true }
+                Invoke-WebRequest @downloadParams
+            }
+            finally {
+                $ProgressPreference = $previousProgressPreference
+            }
+        }
+
+        if (-not (Test-Path -LiteralPath $installerPath)) {
+            throw 'El instalador oficial de .NET Framework no quedo disponible en la cache.'
+        }
+        $fileInfo = Get-Item -LiteralPath $installerPath -ErrorAction Stop
+        if ($fileInfo.Length -lt 1MB) {
+            throw ('El instalador de .NET Framework parece incompleto ({0} bytes).' -f $fileInfo.Length)
+        }
+
+        $signature = Get-AuthenticodeSignature -FilePath $installerPath
+        if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or
+            $signature.SignerCertificate.Subject -notmatch '(?i)CN=Microsoft Corporation') {
+            throw ('La firma Authenticode del instalador .NET no es valida o no pertenece a Microsoft Corporation. Estado: {0}.' -f $signature.Status)
+        }
+
+        Write-JWADMessage -Level 'INFO' -Message ('Instalando .NET Framework {0} para Windows build {1}...' -f $target.Version, $target.WindowsBuild)
+        $arguments = '/q /norestart /ChainingPackage JWAD'
+        $processResult = Invoke-JWADProcess -FilePath $installerPath -ArgumentList $arguments -TimeoutSeconds 1800
+
+        # Verify by the official Release DWORD after setup. Some installers can
+        # return a nonzero code if the target is already staged; registry state
+        # remains the authoritative confirmation of the installed in-place runtime.
+        $postRelease = Get-JWADDotNetFrameworkRelease
+        $postName = Get-JWADDotNetReleaseName -Release $postRelease
+        if ($postRelease -ge [int]$target.MinimumRelease) {
+            $resultStatus = 'INSTALLED'
+            if ($processResult.ExitCode -in @(3010, 1641)) { $resultStatus = 'INSTALLED_REBOOT_REQUIRED' }
+            $timer.Stop()
+            return (New-JWADResult -Name $displayName -Status $resultStatus -Method $method -Version $postName -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage $null)
+        }
+
+        $output = ('{0}{1}{2}' -f [string]$processResult.Output, [Environment]::NewLine, [string]$processResult.Error).Trim()
+        if ($output.Length -gt 1500) { $output = $output.Substring(0, 1500) }
+        throw ('El instalador de .NET Framework {0} termino con ExitCode={1}, pero el registro no confirma la version requerida. Release actual={2}. {3}' -f $target.Version, $processResult.ExitCode, $postRelease, $output)
     }
     catch {
         $timer.Stop()
-        return (New-JWADResult -Name '.NET Framework 4.8+' -Status 'UNKNOWN' -Method 'Registry' -Version 'N/A' -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage $_.Exception.Message)
+        return (New-JWADResult -Name $displayName -Status 'FAILED' -Method $method -Version 'N/A' -Seconds $timer.Elapsed.TotalSeconds -ErrorMessage $_.Exception.Message)
     }
 }
 
@@ -2087,28 +2262,13 @@ $apps = @(
         DetectPattern = '(?i)^(Eclipse Temurin JRE|Eclipse Temurin 21 JRE|Temurin 21 JRE)'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
+        Name = '.NET Framework Runtime'; Action = 'InstallDotNetFramework'
+    },
+    [PSCustomObject]@{
         Name = '7-Zip'; WingetId = '7zip.7zip'; WingetCustomArgs = '';
         ScoopName = '7zip'; ScoopBucket = 'main'; GitHubRepo = 'ip7z/7zip'; RegexAsset = '(?i)^7z[0-9]+-x64\.msi$'; DirectArguments = '';
         ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
         DetectPattern = '(?i)^7-Zip'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
-    },
-    [PSCustomObject]@{
-        Name = 'Bulk Crap Uninstaller'; WingetId = 'Klocman.BulkCrapUninstaller'; WingetCustomArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
-        ScoopName = 'bulk-crap-uninstaller'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
-        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
-        DetectPattern = '(?i)^(Bulk Crap Uninstaller|BCUninstaller)(?:$|\s)'; DirectPageUrl = 'https://sourceforge.net/projects/bulk-crap-uninstaller/files/latest/download'; DirectAssetRegex = '(?i)BCUninstaller_[0-9.]+_setup\.exe'; DirectHashSuffix = ''; DirectJsonUrl = ''
-    },
-    [PSCustomObject]@{
-        Name = 'SumatraPDF'; WingetId = 'SumatraPDF.SumatraPDF'; WingetCustomArgs = '';
-        ScoopName = 'sumatrapdf'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '-install -silent';
-        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
-        DetectPattern = '(?i)^SumatraPDF'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = 'https://raw.githubusercontent.com/ScoopInstaller/Versions/master/bucket/sumatrapdf-installer.json'
-    },
-    [PSCustomObject]@{
-        Name = 'AB Download Manager'; WingetId = 'amir1376.ABDownloadManager'; WingetCustomArgs = '';
-        ScoopName = 'abdownloadmanager'; ScoopBucket = 'extras'; GitHubRepo = 'amir1376/ab-download-manager'; RegexAsset = '(?i)^(?!.*(arm64|aarch64|arm)).*(x64|win64|amd64).*\.(exe)$'; DirectArguments = '/S';
-        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
-        DetectPattern = '(?i)^AB Download Manager'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
         Name = 'WinRAR x64'; WingetId = 'RARLab.WinRAR'; WingetCustomArgs = '/S';
@@ -2117,10 +2277,10 @@ $apps = @(
         DetectPattern = '(?i)^WinRAR'; DirectPageUrl = 'https://www.rarlab.com/download.htm'; DirectAssetRegex = '(?i)winrar-x64-[0-9]+\.exe'; DirectHashSuffix = ''; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
-        Name = 'VLC Media Player'; WingetId = 'VideoLAN.VLC'; WingetCustomArgs = '';
-        ScoopName = 'vlc'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
-        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = 'VideoLAN';
-        DetectPattern = '(?i)^VLC media player'; DirectPageUrl = 'https://download.videolan.org/vlc/last/win64/'; DirectAssetRegex = '(?i)^vlc-[0-9.]+-win64\.msi$'; DirectHashSuffix = '.sha256'; DirectJsonUrl = ''
+        Name = 'Microsoft Edge'; WingetId = 'Microsoft.Edge'; WingetCustomArgs = '';
+        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = 'Microsoft Corporation';
+        DetectPattern = '(?i)^Microsoft Edge'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = 'https://edgeupdates.microsoft.com/api/products?view=enterprise'
     },
     [PSCustomObject]@{
         Name = 'Google Chrome'; WingetId = 'Google.Chrome'; WingetCustomArgs = '';
@@ -2141,21 +2301,39 @@ $apps = @(
         DetectPattern = '(?i)^Mullvad Browser'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
-        Name = 'Microsoft Edge'; WingetId = 'Microsoft.Edge'; WingetCustomArgs = '';
-        ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
-        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = 'Microsoft Corporation';
-        DetectPattern = '(?i)^Microsoft Edge'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = 'https://edgeupdates.microsoft.com/api/products?view=enterprise'
+        Name = 'VLC Media Player'; WingetId = 'VideoLAN.VLC'; WingetCustomArgs = '';
+        ScoopName = 'vlc'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = 'VideoLAN';
+        DetectPattern = '(?i)^VLC media player'; DirectPageUrl = 'https://download.videolan.org/vlc/last/win64/'; DirectAssetRegex = '(?i)^vlc-[0-9.]+-win64\.msi$'; DirectHashSuffix = '.sha256'; DirectJsonUrl = ''
     },
     [PSCustomObject]@{
         Name = 'FlyPhotos'; WingetId = ''; WingetCustomArgs = '';
         ScoopName = ''; ScoopBucket = 'main'; GitHubRepo = 'riyasy/FlyPhotos'; RegexAsset = '(?i)^(?!.*(arm64|aarch64|arm)).*(x64|win64|amd64).*\.msi$'; DirectArguments = '';
         ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
         DetectPattern = '(?i)^Fly\s*Photos(?:$|\s)|^FlyPhotos(?:$|\s)'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
+    },
+    [PSCustomObject]@{
+        Name = 'SumatraPDF'; WingetId = 'SumatraPDF.SumatraPDF'; WingetCustomArgs = '';
+        ScoopName = 'sumatrapdf'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '-install -silent';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
+        DetectPattern = '(?i)^SumatraPDF'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = 'https://raw.githubusercontent.com/ScoopInstaller/Versions/master/bucket/sumatrapdf-installer.json'
+    },
+    [PSCustomObject]@{
+        Name = 'AB Download Manager'; WingetId = 'amir1376.ABDownloadManager'; WingetCustomArgs = '';
+        ScoopName = 'abdownloadmanager'; ScoopBucket = 'extras'; GitHubRepo = 'amir1376/ab-download-manager'; RegexAsset = '(?i)^(?!.*(arm64|aarch64|arm)).*(x64|win64|amd64).*\.(exe)$'; DirectArguments = '/S';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
+        DetectPattern = '(?i)^AB Download Manager'; DirectPageUrl = ''; DirectAssetRegex = ''; DirectHashSuffix = ''; DirectJsonUrl = ''
+    },
+    [PSCustomObject]@{
+        Name = 'Bulk Crap Uninstaller'; WingetId = 'Klocman.BulkCrapUninstaller'; WingetCustomArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
+        ScoopName = 'bulk-crap-uninstaller'; ScoopBucket = 'extras'; GitHubRepo = ''; RegexAsset = ''; DirectArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART';
+        ExpectedSHA256 = ''; DirectUrl = ''; DirectFileName = ''; ExpectedSigner = '';
+        DetectPattern = '(?i)^(Bulk Crap Uninstaller|BCUninstaller)(?:$|\s)'; DirectPageUrl = 'https://sourceforge.net/projects/bulk-crap-uninstaller/files/latest/download'; DirectAssetRegex = '(?i)BCUninstaller_[0-9.]+_setup\.exe'; DirectHashSuffix = ''; DirectJsonUrl = ''
     }
 )
 
-# Total = 13 pasos de aplicacion y una validacion .NET.
-$totalSteps = $apps.Count + 1
+# Total = 14 pasos: 13 aplicaciones originales + instalacion/actualizacion de .NET Framework.
+$totalSteps = $apps.Count
 $step = 0
 
 Write-Host ''
@@ -2163,18 +2341,23 @@ Write-JWADMessage -Level 'TITLE' -Message 'INICIO DE INSTALACIONES'
 foreach ($app in $apps) {
     $step++
     Show-JWADProgress -Current $step -Total $totalSteps -Label $app.Name
-    [void](Install-UniversalApp -AppName $app.Name -WingetId $app.WingetId -WingetCustomArgs $app.WingetCustomArgs -ScoopName $app.ScoopName -ScoopBucket $app.ScoopBucket -GitHubRepo $app.GitHubRepo -RegexAsset $app.RegexAsset -DirectArguments $app.DirectArguments -ExpectedSHA256 $app.ExpectedSHA256 -DirectUrl $app.DirectUrl -DirectFileName $app.DirectFileName -ExpectedSigner $app.ExpectedSigner -DetectPattern $app.DetectPattern -DirectPageUrl $app.DirectPageUrl -DirectAssetRegex $app.DirectAssetRegex -DirectHashSuffix $app.DirectHashSuffix -DirectJsonUrl $app.DirectJsonUrl)
-}
 
-$step++
-Show-JWADProgress -Current $step -Total $totalSteps -Label '.NET Framework 4.8+ (validacion)'
-$dotNetResult = Test-JWADDotNetFramework
-$script:InstallResults.Add($dotNetResult)
-if ($dotNetResult.estado -eq 'VALIDATED') {
-    Write-JWADMessage -Level 'OK' -Message ('.NET Framework validado: {0}' -f $dotNetResult.version_instalada)
-}
-else {
-    Write-JWADMessage -Level 'WARN' -Message ('.NET Framework: {0}' -f $dotNetResult.estado)
+    $actionProperty = $app.PSObject.Properties['Action']
+    if ($null -ne $actionProperty) {
+        if ([string]$actionProperty.Value -eq 'InstallDotNetFramework') {
+            $dotNetResult = Install-JWADDotNetFramework
+            $script:InstallResults.Add($dotNetResult)
+            $dotNetLevel = if ($dotNetResult.estado -in @('INSTALLED', 'INSTALLED_REBOOT_REQUIRED', 'ALREADY_PRESENT')) { 'OK' } else { 'ERROR' }
+            $dotNetMessage = '.NET Framework: {0} mediante {1}; version {2}' -f $dotNetResult.estado, $dotNetResult.metodo_instalacion, $dotNetResult.version_instalada
+            if ($dotNetResult.estado -eq 'FAILED' -and -not [string]::IsNullOrWhiteSpace($dotNetResult.error_mensaje)) {
+                $dotNetMessage += ' | Detalle: ' + $dotNetResult.error_mensaje
+            }
+            Write-JWADMessage -Level $dotNetLevel -Message $dotNetMessage
+            continue
+        }
+    }
+
+    [void](Install-UniversalApp -AppName $app.Name -WingetId $app.WingetId -WingetCustomArgs $app.WingetCustomArgs -ScoopName $app.ScoopName -ScoopBucket $app.ScoopBucket -GitHubRepo $app.GitHubRepo -RegexAsset $app.RegexAsset -DirectArguments $app.DirectArguments -ExpectedSHA256 $app.ExpectedSHA256 -DirectUrl $app.DirectUrl -DirectFileName $app.DirectFileName -ExpectedSigner $app.ExpectedSigner -DetectPattern $app.DetectPattern -DirectPageUrl $app.DirectPageUrl -DirectAssetRegex $app.DirectAssetRegex -DirectHashSuffix $app.DirectHashSuffix -DirectJsonUrl $app.DirectJsonUrl)
 }
 
 # -----------------------------------------------------------------------------
